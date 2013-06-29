@@ -46,6 +46,8 @@
 #include <plat/serial.h>
 #include <plat/omap-pm.h>
 
+#include <plat/common.h>
+
 #define UART_OMAP_IIR_ID		0x3e
 #define UART_OMAP_IIR_RX_TIMEOUT	0xc
 #define PADCONF_SAFEMODE		0x7
@@ -1665,9 +1667,11 @@ static int serial_omap_probe(struct platform_device *pdev)
 	up->port.membase = ioremap(mem->start, mem->end - mem->start);
 
 #ifdef CONFIG_EMU_UART_DEBUG
-	printk("Enabling uart clocks\n");
-	od = to_omap_device(up->pdev);
-	omap_hwmod_enable_clocks(od->hwmods[0]);
+	if (pdev->id == 2) {
+		printk("EMU_UART Enabled: Enabling UART.2 clock\n");
+		od = to_omap_device(up->pdev);
+		omap_hwmod_enable_clocks(od->hwmods[0]);
+	}
 #endif
 
 	if (!up->port.membase) {

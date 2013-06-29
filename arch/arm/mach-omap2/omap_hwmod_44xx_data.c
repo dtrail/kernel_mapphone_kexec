@@ -5545,7 +5545,7 @@ static struct omap_hwmod_ocp_if omap44xx_l4_per__uart1 = {
 	.slave		= &omap44xx_uart1_hwmod,
 	.clk		= "l4_div_ck",
 	.addr		= omap44xx_uart1_addrs,
-	.addr_cnt	= ARRAY_SIZE(omap44xx_uart1_addrs),
+	.addr_cnt 	= ARRAY_SIZE(omap44xx_uart1_addrs), 
 	.user		= OCP_USER_MPU | OCP_USER_SDMA,
 };
 
@@ -5557,6 +5557,7 @@ static struct omap_hwmod_ocp_if *omap44xx_uart1_slaves[] = {
 static struct omap_hwmod omap44xx_uart1_hwmod = {
 	.name		= "uart1",
 	.class		= &omap44xx_uart_hwmod_class,
+	.flags		= HWMOD_SWSUP_SIDLE,
 	.mpu_irqs	= omap44xx_uart1_irqs,
 	.mpu_irqs_cnt	= ARRAY_SIZE(omap44xx_uart1_irqs),
 	.sdma_reqs	= omap44xx_uart1_sdma_reqs,
@@ -5610,6 +5611,7 @@ static struct omap_hwmod_ocp_if *omap44xx_uart2_slaves[] = {
 static struct omap_hwmod omap44xx_uart2_hwmod = {
 	.name		= "uart2",
 	.class		= &omap44xx_uart_hwmod_class,
+	.flags		= HWMOD_SWSUP_SIDLE,
 	.mpu_irqs	= omap44xx_uart2_irqs,
 	.mpu_irqs_cnt	= ARRAY_SIZE(omap44xx_uart2_irqs),
 	.sdma_reqs	= omap44xx_uart2_sdma_reqs,
@@ -5665,6 +5667,8 @@ static struct omap_hwmod omap44xx_uart3_hwmod = {
 	.class		= &omap44xx_uart_hwmod_class,
 #ifdef CONFIG_EMU_UART_DEBUG
 	.flags		= (HWMOD_INIT_NO_IDLE | HWMOD_INIT_NO_RESET),
+#else
+	.flags		= HWMOD_SWSUP_SIDLE,
 #endif
 	.mpu_irqs	= omap44xx_uart3_irqs,
 	.mpu_irqs_cnt	= ARRAY_SIZE(omap44xx_uart3_irqs),
@@ -5719,6 +5723,7 @@ static struct omap_hwmod_ocp_if *omap44xx_uart4_slaves[] = {
 static struct omap_hwmod omap44xx_uart4_hwmod = {
 	.name		= "uart4",
 	.class		= &omap44xx_uart_hwmod_class,
+	.flags		= HWMOD_SWSUP_SIDLE,
 	.mpu_irqs	= omap44xx_uart4_irqs,
 	.mpu_irqs_cnt	= ARRAY_SIZE(omap44xx_uart4_irqs),
 	.sdma_reqs	= omap44xx_uart4_sdma_reqs,
@@ -6338,8 +6343,8 @@ static __initdata struct omap_hwmod *omap44xx_hwmods[] = {
 	/* uart class */
 	&omap44xx_uart1_hwmod,
 	&omap44xx_uart2_hwmod,
-#ifdef CONFIG_EMU_UART_DEBUG
-	//TODO: just to prevent debug_ll from dying
+#ifndef CONFIG_EMU_UART_DEBUG
+	//FIXME-HASH: If EMU_UART we should not call this to prevent debug_ll from dying
 	&omap44xx_uart3_hwmod,
 #endif
 	&omap44xx_uart4_hwmod,
