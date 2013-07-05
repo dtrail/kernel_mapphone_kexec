@@ -20,7 +20,7 @@ export CROSS_COMPILE=arm-eabi-
 
 
 # define the defconfig (Do not change)
-make ARCH=arm mapphone_defconfig
+make ARCH=arm mapphone_GSM_defconfig
 # export LOCALVERSION="-Stock-1.0-Core"
 
 
