@@ -1096,4 +1096,3 @@ static void __exit crc32_exit(void)
 module_init(crc32test_init);
 module_exit(crc32_exit);
 #endif /* CONFIG_CRC32_SELFTEST */
-
