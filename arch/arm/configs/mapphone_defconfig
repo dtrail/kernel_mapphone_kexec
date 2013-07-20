@@ -3125,6 +3125,10 @@ CONFIG_CRYPTO_HW=y
 # CONFIG_BINARY_PRINTF is not set
 
 #
+# FIPS moto_crypto module
+#
+CONFIG_CRYPTO_MOTOROLA_FIPS=y
+
 # Library routines
 #
 CONFIG_BITREVERSE=y
