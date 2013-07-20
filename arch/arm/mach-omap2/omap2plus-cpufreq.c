@@ -43,6 +43,14 @@
 #include "dvfs.h"
 #include "omap2plus-cpufreq.h"
 
+#ifdef CONFIG_CUSTOM_VOLTAGE
+#include <linux/custom_voltage.h>
+#endif
+
+#ifdef CONFIG_LIVE_OC
+#include <linux/live_oc.h>
+#endif
+
 #ifdef CONFIG_SMP
 struct lpj_info {
 	unsigned long	ref;
@@ -66,6 +74,13 @@ static unsigned int current_target_freq;
 static unsigned int current_cooling_level;
 static bool omap_cpufreq_ready;
 static bool omap_cpufreq_suspended;
+static unsigned int screen_off_max_freq;
+
+int oc_val = 0;
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+extern bool lmf_screen_state;
+#endif
 
 static unsigned int omap_getspeed(unsigned int cpu)
 {
@@ -227,6 +242,10 @@ static int omap_target(struct cpufreq_policy *policy,
 	unsigned int i;
 	int ret = 0;
 
+#ifdef CONFIG_LIVE_OC
+	mutex_lock(&omap_cpufreq_lock);
+#endif
+
 	if (!freq_table) {
 		dev_err(mpu_dev, "%s: cpu%d: no freq table!\n", __func__,
 				policy->cpu);
@@ -241,7 +260,9 @@ static int omap_target(struct cpufreq_policy *policy,
 		return ret;
 	}
 
+#ifndef CONFIG_LIVE_OC
 	mutex_lock(&omap_cpufreq_lock);
+#endif
 
 	current_target_freq = freq_table[i].frequency;
 
@@ -388,10 +409,22 @@ static int __cpuinit omap_cpu_init(struct cpufreq_policy *policy)
 
 	cpufreq_frequency_table_get_attr(freq_table, policy->cpu);
 
+#ifdef CONFIG_OMAP_OCFREQ_12
+	/* We don't set an "if rule" so user won't be stuck at 100/1000 min/max */
+	/* BEcause the policy handling is broken in kexec we have to set a rule for all frequencies below 300mhz */
+	if (policy->cpuinfo.min_freq > 200000 && policy->min > 200000)
+   	policy->min = policy->cpuinfo.min_freq;
+	if (policy->cpuinfo.min_freq == 100000 && policy->min > 100000)
+	policy->min = 100000;
+	if (policy->cpuinfo.min_freq == 200000 && policy->min > 200000)
+	policy->min = 200000;
+	policy->max = policy->cpuinfo.max_freq;
+	policy->cur = omap_getspeed(policy->cpu);
+#else
 	policy->min = policy->cpuinfo.min_freq;
 	policy->max = policy->cpuinfo.max_freq;
 	policy->cur = omap_getspeed(policy->cpu);
-
+#endif
 	for (i = 0; freq_table[i].frequency != CPUFREQ_TABLE_END; i++)
 		max_freq = max(freq_table[i].frequency, max_freq);
 	max_thermal = max_freq;
@@ -409,9 +442,19 @@ static int __cpuinit omap_cpu_init(struct cpufreq_policy *policy)
 		cpumask_setall(policy->cpus);
 	}
 
-	omap_cpufreq_cooling_init();
-	/* FIXME: what's the actual transition time? */
+	/* Tranisition time for worst case */
 	policy->cpuinfo.transition_latency = 300 * 1000;
+
+#ifdef CONFIG_CUSTOM_VOLTAGE
+	customvoltage_register_freqmutex(&omap_cpufreq_lock);
+#endif
+
+#ifdef CONFIG_LIVE_OC
+	liveoc_register_maxthermal(&max_thermal);
+	liveoc_register_maxfreq(&max_freq);
+	liveoc_register_freqtable(freq_table);
+	liveoc_register_freqmutex(&omap_cpufreq_lock);
+#endif
 
 	return 0;
 
@@ -429,8 +472,208 @@ static int omap_cpu_exit(struct cpufreq_policy *policy)
 	return 0;
 }
 
+static ssize_t show_screen_off_freq(struct cpufreq_policy *policy, char *buf)
+{
+	return sprintf(buf, "%u\n", screen_off_max_freq);
+}
+
+static ssize_t store_screen_off_freq(struct cpufreq_policy *policy,
+	const char *buf, size_t count)
+{
+	unsigned int freq = 0;
+	int ret;
+	int index;
+
+	if (!freq_table)
+		return -EINVAL;
+
+	ret = sscanf(buf, "%u", &freq);
+	if (ret != 1)
+		return -EINVAL;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+	ret = cpufreq_frequency_table_target(policy, freq_table, freq,
+		CPUFREQ_RELATION_H, &index);
+	if (ret)
+		goto out;
+
+	screen_off_max_freq = freq_table[index].frequency;
+
+	ret = count;
+
+out:
+	mutex_unlock(&omap_cpufreq_lock);
+	return ret;
+}
+
+struct freq_attr omap_cpufreq_attr_screen_off_freq = {
+	.attr = { .name = "screen_off_max_freq",
+		  .mode = 0644,
+		},
+	.show = show_screen_off_freq,
+	.store = store_screen_off_freq,
+};
+/* OMAP4 MPU Voltage Control struct opp is defined elsewhere, but not in any accessible header files */
+struct opp {
+        struct list_head node;
+
+        bool available;
+        unsigned long rate;
+        unsigned long u_volt;
+
+        struct device_opp *dev_opp;
+};
+
+static ssize_t show_uV_mV_table(struct cpufreq_policy *policy, char *buf)
+{
+int i = 0;
+unsigned long volt_cur;
+char *out = buf;
+struct opp *opp_cur;
+
+/* Reverse order sysfs entries for consistency */
+while(freq_table[i].frequency != CPUFREQ_TABLE_END)
+                i++;
+
+/* For each entry in the cpufreq table, print the voltage */
+for(i--; i >= 0; i--) {
+if(freq_table[i].frequency != CPUFREQ_ENTRY_INVALID) {
+/* Find the opp for this frequency */
+opp_cur = opp_find_freq_exact(mpu_dev,
+freq_table[i].frequency*1000, true);
+/* sprint the voltage (mV)/frequency (MHz) pairs */
+volt_cur = opp_cur->u_volt;
+out += sprintf(out, "%umhz: %lu mV\n",
+freq_table[i].frequency/1000, volt_cur/1000);
+}
+}
+        return out-buf;
+}
+
+static ssize_t store_uV_mV_table(struct cpufreq_policy *policy,
+const char *buf, size_t count)
+{
+int i = 0;
+unsigned long volt_cur, volt_old;
+int ret;
+char size_cur[16];
+struct opp *opp_cur;
+struct voltagedomain *mpu_voltdm;
+mpu_voltdm = voltdm_lookup("mpu");
+
+while(freq_table[i].frequency != CPUFREQ_TABLE_END)
+i++;
+
+for(i--; i >= 0; i--) {
+if(freq_table[i].frequency != CPUFREQ_ENTRY_INVALID) {
+ret = sscanf(buf, "%lu", &volt_cur);
+if(ret != 1) {
+return -EINVAL;
+}
+
+/* Alter voltage. First do it in our opp */
+opp_cur = opp_find_freq_exact(mpu_dev,
+freq_table[i].frequency*1000, true);
+opp_cur->u_volt = volt_cur*1000;
+
+/* Then we need to alter voltage domains */
+/* Save our old voltage */
+volt_old = mpu_voltdm->vdd->volt_data[i].volt_nominal;
+/* Change our main and dependent voltage tables */
+mpu_voltdm->vdd->
+volt_data[i].volt_nominal = volt_cur*1000;
+mpu_voltdm->vdd->dep_vdd_info->
+dep_table[i].main_vdd_volt = volt_cur*1000;
+
+/* Alter current voltage in voltdm, if appropriate */
+if(volt_old == mpu_voltdm->curr_volt) {
+mpu_voltdm->curr_volt = volt_cur*1000;
+}
+
+/* Non-standard sysfs interface: advance buf */
+ret = sscanf(buf, "%s", size_cur);
+buf += (strlen(size_cur)+1);
+}
+else {
+pr_err("%s: frequency entry invalid for %u\n",
+__func__, freq_table[i].frequency);
+}
+}
+return count;
+}
+
+static struct freq_attr omap_uV_mV_table = {
+.attr = {.name = "UV_mV_table", .mode=0644,},
+.show = show_uV_mV_table,
+.store = store_uV_mV_table,
+};
+
+/*
+ * Variable GPU OC - sysfs interface for cycling through different GPU top speeds
+ * Author: imoseyon@gmail.com
+ *
+*/
+
+static ssize_t show_gpu_oc(struct cpufreq_policy *policy, char *buf)
+{
+	return sprintf(buf, "%d\n", oc_val);
+}
+
+static ssize_t store_gpu_oc(struct cpufreq_policy *policy, const char *buf, size_t size)
+{
+	int prev_oc, ret1, ret2; 
+        struct device *dev;
+	unsigned long gpu_freqs[3] = {307200000,384000000,416000000};
+
+	prev_oc = oc_val;
+	if (prev_oc < 0 || prev_oc > 2) {
+		// shouldn't be here
+		pr_info("[dtrail] gpu_oc error - bailing\n");	
+		return size;
+	}
+	
+	sscanf(buf, "%d\n", &oc_val);
+	if (oc_val < 0 ) oc_val = 0;
+	if (oc_val > 2 ) oc_val = 2;
+	if (prev_oc == oc_val) return size;
+
+        dev = omap_hwmod_name_get_dev("gpu");
+
+#ifdef CONFIG_PVR_GOVERNOR
+  if (prev_oc < 2 && oc_val == 2) {
+    ret1 = opp_disable(dev, gpu_freqs[1]);
+    ret2 = opp_enable(dev, gpu_freqs[oc_val]);
+    pr_info("[imoseyon] gpu top speed changed from %lu to %lu (%d,%d)\n", 
+      gpu_freqs[prev_oc], gpu_freqs[oc_val], ret1, ret2);
+  } else if (prev_oc == 2) {
+    ret1 = opp_disable(dev, gpu_freqs[prev_oc]);
+    ret2 = opp_enable(dev, gpu_freqs[1]);
+    pr_info("[imoseyon] gpu top speed changed from %lu to %lu (%d,%d)\n", 
+      gpu_freqs[prev_oc], gpu_freqs[oc_val], ret1, ret2);
+  } else {
+    pr_info("[imoseyon] gpu top speed changed from %lu to %lu (%d,%d)\n", 
+      gpu_freqs[prev_oc], gpu_freqs[oc_val]);
+  }
+#else 
+        ret1 = opp_disable(dev, gpu_freqs[prev_oc]);
+        ret2 = opp_enable(dev, gpu_freqs[oc_val]);
+        pr_info("[dtrail] gpu top speed changed from %lu to %lu (%d,%d)\n", 
+		gpu_freqs[prev_oc], gpu_freqs[oc_val], ret1, ret2);
+#endif	
+	return size;
+}
+
+static struct freq_attr gpu_oc = {
+	.attr = {.name = "gpu_oc", .mode=0666,},
+	.show = show_gpu_oc,
+	.store = store_gpu_oc,
+};
 static struct freq_attr *omap_cpufreq_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
+	&omap_cpufreq_attr_screen_off_freq,
+	&omap_uV_mV_table,
+	&gpu_oc,
 	NULL,
 };
 
@@ -445,9 +688,68 @@ static struct cpufreq_driver omap_driver = {
 	.attr		= omap_cpufreq_attr,
 };
 
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+#define MAX_GOV_NAME_LEN 16
+static char cpufreq_default_gov[CONFIG_NR_CPUS][MAX_GOV_NAME_LEN];
+static char *cpufreq_hotplug_gov = "hotplug";
+
+static void cpufreq_store_default_gov(void)
+{
+unsigned int cpu;
+struct cpufreq_policy *policy;
+
+	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
+		policy = cpufreq_cpu_get(cpu);
+	  if (policy) {
+	sprintf(cpufreq_default_gov[cpu], "%s",
+		policy->governor->name);
+		cpufreq_cpu_put(policy);
+		}
+	}
+}
+
+static int cpufreq_change_gov(char *target_gov)
+{
+	unsigned int cpu = 0;
+	for_each_online_cpu(cpu)
+	return cpufreq_set_gov(target_gov, cpu);
+}
+
+static int cpufreq_restore_default_gov(void)
+{
+	int ret = 0;
+	unsigned int cpu;
+
+	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
+		if (strlen((const char *)&cpufreq_default_gov[cpu])) {
+	ret = cpufreq_set_gov(cpufreq_default_gov[cpu], cpu);
+		if (ret < 0)
+	/* Unable to restore gov for the cpu as
+	* It was online on suspend and becomes
+	* offline on resume.
+	*/
+		pr_info("Unable to restore gov:%s for cpu:%d,"
+			, cpufreq_default_gov[cpu]
+			, cpu);
+	}
+	cpufreq_default_gov[cpu][0] = '\0';
+}
+	return ret;
+}
+#endif
+
 static int omap_cpufreq_suspend_noirq(struct device *dev)
 {
 	mutex_lock(&omap_cpufreq_lock);
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+lmf_screen_state = false;
+#endif
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+cpufreq_store_default_gov();
+if (cpufreq_change_gov(cpufreq_hotplug_gov))
+pr_err("Early_suspend: Error changing governor to %s\n",
+cpufreq_hotplug_gov);
+#endif
 	omap_cpufreq_suspended = true;
 	mutex_unlock(&omap_cpufreq_lock);
 	return 0;
@@ -456,6 +758,13 @@ static int omap_cpufreq_suspend_noirq(struct device *dev)
 static int omap_cpufreq_resume_noirq(struct device *dev)
 {
 	mutex_lock(&omap_cpufreq_lock);
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+lmf_screen_state = true;
+#endif
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+if (cpufreq_restore_default_gov())
+pr_err("Early_suspend: Unable to restore governor\n");
+#endif
 	if (omap_getspeed(0) != current_target_freq)
 		omap_cpufreq_scale(mpu_dev, current_target_freq);
 
@@ -480,6 +789,8 @@ static struct platform_device omap_cpufreq_device = {
 static int __init omap_cpufreq_init(void)
 {
 	int ret;
+
+	/* oc_val = 0; */
 
 	if (cpu_is_omap24xx())
 		mpu_clk_name = "virt_prcm_set";
@@ -515,6 +826,7 @@ static int __init omap_cpufreq_init(void)
 		if (t)
 			pr_warn("%s_init: platform_driver_register failed\n",
 				__func__);
+	ret = omap_cpufreq_cooling_init();
 	}
 
 	return ret;
@@ -532,3 +844,4 @@ MODULE_DESCRIPTION("cpufreq driver for OMAP2PLUS SOCs");
 MODULE_LICENSE("GPL");
 late_initcall(omap_cpufreq_init);
 module_exit(omap_cpufreq_exit);
+

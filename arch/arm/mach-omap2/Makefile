@@ -300,6 +300,8 @@ obj-$(CONFIG_MACH_MAPPHONE)		+= board-mapphone.o \
 					   pmic-max8952.o	\
 					   pmic-cpcap.o
 
+obj-$(CONFIG_FORCE_FAST_CHARGE)		+= fastchg.o
+
 obj-$(CONFIG_MACH_OMAP3517EVM)		+= board-am3517evm.o \
 					   omap_phy_internal.o \
 
@@ -341,6 +343,7 @@ obj-$(CONFIG_OMAP_HSI_DEVICE)		+= omap_hsi.o
 obj-$(CONFIG_ION_OMAP)			+= omap4_ion.o
 obj-$(CONFIG_ARCH_OMAP4)		+= omap_dmm.o
 obj-$(CONFIG_OMAP_FIQ_DEBUGGER)		+= omap_fiq_debugger.o
+obj-$(CONFIG_RQ_STATS)      		+= rq_stats.o 
 
 ifeq ($(CONFIG_OMAP_REBOOT_REASON),y)
 obj-$(CONFIG_ARCH_OMAP4)		+= omap4-reboot-reason.o

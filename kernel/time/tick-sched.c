@@ -20,10 +20,15 @@
 #include <linux/profile.h>
 #include <linux/sched.h>
 #include <linux/module.h>
+#include <linux/rq_stats.h> 
 
 #include <asm/irq_regs.h>
 
 #include "tick-internal.h"
+
+struct rq_data rq_info;
+struct workqueue_struct *rq_wq;
+spinlock_t rq_lock;
 
 /*
  * Per cpu nohz control structure
@@ -324,7 +329,7 @@ void tick_nohz_stop_sched_tick(int inidle)
 	} while (read_seqretry(&xtime_lock, seq));
 
 	if (rcu_needs_cpu(cpu) || printk_needs_cpu(cpu) ||
-	    arch_needs_cpu(cpu)) {
+	    arch_needs_cpu(cpu) || this_cpu_load()) {
 		next_jiffies = last_jiffies + 1;
 		delta_jiffies = 1;
 	} else {
@@ -505,19 +510,21 @@ void tick_nohz_restart_sched_tick(void)
 	ktime_t now;
 
 	local_irq_disable();
-	if (ts->idle_active || (ts->inidle && ts->tick_stopped))
+
+	WARN_ON_ONCE(!ts->inidle);
+
+	ts->inidle = 0;
+
+	if (ts->idle_active || ts->tick_stopped)
 		now = ktime_get();
 
 	if (ts->idle_active)
 		tick_nohz_stop_idle(cpu, now);
 
-	if (!ts->inidle || !ts->tick_stopped) {
-		ts->inidle = 0;
+	if (!ts->tick_stopped) {
 		local_irq_enable();
 		return;
 	}
-
-	ts->inidle = 0;
 
 	rcu_exit_nohz();
 
@@ -711,6 +718,56 @@ void tick_check_idle(int cpu)
  * High resolution timer specific code
  */
 #ifdef CONFIG_HIGH_RES_TIMERS
+static void update_rq_stats(void)
+{
+        unsigned long jiffy_gap = 0;
+        unsigned int rq_avg = 0;
+        unsigned long flags = 0;
+
+        jiffy_gap = jiffies - rq_info.rq_poll_last_jiffy;
+
+        if (jiffy_gap >= rq_info.rq_poll_jiffies) {
+
+                spin_lock_irqsave(&rq_lock, flags);
+
+                if (!rq_info.rq_avg)
+                        rq_info.rq_poll_total_jiffies = 0;
+
+                rq_avg = nr_running() * 10;
+
+                if (rq_info.rq_poll_total_jiffies) {
+                        rq_avg = (rq_avg * jiffy_gap) +
+                                (rq_info.rq_avg *
+                                 rq_info.rq_poll_total_jiffies);
+                        do_div(rq_avg,
+                               rq_info.rq_poll_total_jiffies + jiffy_gap);
+                }
+
+                rq_info.rq_avg =  rq_avg;
+                rq_info.rq_poll_total_jiffies += jiffy_gap;
+                rq_info.rq_poll_last_jiffy = jiffies;
+
+                spin_unlock_irqrestore(&rq_lock, flags);
+#if 0
+                CPU_DEBUG_PRINTK(CPU_DEBUG_RQ,
+                        " rq_stat is %u, total_ms=%u",
+                        (unsigned int)rq_avg,
+                        jiffies_to_msecs(rq_info.rq_poll_total_jiffies));a
+#endif
+        }
+}
+
+static void wakeup_user(void)
+{
+        unsigned long jiffy_gap;
+
+        jiffy_gap = jiffies - rq_info.def_timer_last_jiffy;
+
+        if (jiffy_gap >= rq_info.def_timer_jiffies) {
+                rq_info.def_timer_last_jiffy = jiffies;
+                queue_work(rq_wq, &rq_info.def_timer_work);
+        }
+} 
 /*
  * We rearm the timer until we get disabled by the idle code.
  * Called with interrupts disabled and timer->base->cpu_base->lock held.
@@ -758,6 +815,19 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		}
 		update_process_times(user_mode(regs));
 		profile_tick(CPU_PROFILING);
+
+                if ((rq_info.init == 1) && (tick_do_timer_cpu == cpu)) {
+
+                        /*
+                         * update run queue statistics
+                         */
+                        update_rq_stats();
+
+                        /*
+                         * wakeup user if needed
+                         */
+                        wakeup_user();
+                } 
 	}
 
 	hrtimer_forward(timer, now, tick_period);

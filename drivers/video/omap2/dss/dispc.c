@@ -48,6 +48,9 @@
 #include "dss.h"
 #include "dss_features.h"
 #include "dispc.h"
+#ifdef CONFIG_OMAP2_DSS_GAMMA_CONTROL
+#include "gammatable.h"
+#endif
 
 /* DISPC */
 #define DISPC_SZ_REGS			SZ_4K
@@ -457,69 +460,6 @@ void dispc_restore_context(void)
 #undef SR
 #undef RR
 
-static u32 dispc_calculate_threshold(enum omap_plane plane, u32 paddr,
-				u32 puv_addr, u16 width, u16 height,
-				s32 row_inc, s32 pix_inc)
-{
-	int shift;
-	u32 channel_no = plane;
-	u32 val, burstsize, doublestride;
-	u32 rotation, bursttype, color_mode;
-	struct dispc_config dispc_reg_config;
-
-	if (width >= 1920)
-		return 1500;
-
-	/* Get the burst size */
-	shift = (plane == OMAP_DSS_GFX) ? 6 : 14;
-	val = dispc_read_reg(DISPC_OVL_ATTRIBUTES(plane));
-	burstsize = FLD_GET(val, shift + 1, shift);
-	doublestride = FLD_GET(val, 22, 22);
-	rotation = FLD_GET(val, 13, 12);
-	bursttype = FLD_GET(val, 29, 29);
-	color_mode = FLD_GET(val, 4, 1);
-
-	/* base address for frame (Luma frame in case of YUV420) */
-	dispc_reg_config.ba = paddr;
-	/* base address for Chroma frame in case of YUV420 */
-	dispc_reg_config.bacbcr = puv_addr;
-	/* OrgSizeX for frame */
-	dispc_reg_config.sizex = width - 1;
-	/* OrgSizeY for frame */
-	dispc_reg_config.sizey = height - 1;
-	/* burst size */
-	dispc_reg_config.burstsize = burstsize;
-	/* pixel increment */
-	dispc_reg_config.pixelinc = pix_inc;
-	/* row increment */
-	dispc_reg_config.rowinc  = row_inc;
-	/* burst type: 1D/2D */
-	dispc_reg_config.bursttype = bursttype;
-	/* chroma DoubleStride when in YUV420 format */
-	dispc_reg_config.doublestride = doublestride;
-	/* Pixcel format of the frame.*/
-	dispc_reg_config.format = color_mode;
-	/* Rotation of frame */
-	dispc_reg_config.rotation = rotation;
-
-	/* DMA buffer allications - assuming reset values */
-	dispc_reg_config.gfx_top_buffer = 0;
-	dispc_reg_config.gfx_bottom_buffer = 0;
-	dispc_reg_config.vid1_top_buffer = 1;
-	dispc_reg_config.vid1_bottom_buffer = 1;
-	dispc_reg_config.vid2_top_buffer = 2;
-	dispc_reg_config.vid2_bottom_buffer = 2;
-	dispc_reg_config.vid3_top_buffer = 3;
-	dispc_reg_config.vid3_bottom_buffer = 3;
-	dispc_reg_config.wb_top_buffer = 4;
-	dispc_reg_config.wb_bottom_buffer = 4;
-
-	/* antiFlicker is off */
-	dispc_reg_config.antiflicker = 0;
-
-	return sa_calc_wrap(&dispc_reg_config, channel_no);
-}
-
 int dispc_runtime_get(void)
 {
 	int r = 0;
@@ -829,7 +769,7 @@ dispc_get_scaling_coef(u32 inc, bool five_taps)
 	static const struct dispc_hv_coef coef_M32[8] = {
 		{    7,   34,   46,   34,    7 },
 		{    4,   31,   46,   37,   10 },
-		{    1,   27,   46,   39,   14 },
+		{    1,   28,   46,   39,   14 },
 		{   -1,   24,   46,   42,   17 },
 		{   21,   45,   45,   21,   -4 },
 		{   17,   42,   46,   24,   -1 },
@@ -1475,10 +1415,10 @@ static void _dispc_set_scale_param(enum omap_plane plane,
 	hscaleup = orig_width <= out_width;
 	vscaleup = orig_height <= out_height;
 
-	_dispc_set_scale_coef(plane, hscaleup, vscaleup, five_taps, color_comp);
-
 	fir_hinc = 1024 * orig_width / out_width;
 	fir_vinc = 1024 * orig_height / out_height;
+
+	_dispc_set_scale_coef(plane, fir_hinc, fir_vinc, five_taps, color_comp);
 
 	_dispc_set_fir(plane, fir_hinc, fir_vinc, color_comp);
 }
@@ -2175,8 +2115,8 @@ int dispc_scaling_decision(u16 width, u16 height,
 		if (!can_scale)
 			goto loop;
 
-		if (out_width < in_width / maxdownscale ||
-			out_height < in_height / maxdownscale)
+		if (out_width * maxdownscale < in_width ||
+			out_height * maxdownscale < in_height) 
 			goto loop;
 
 		/* Use 5-tap filter unless must use 3-tap */
@@ -2267,6 +2207,7 @@ int dispc_setup_plane(enum omap_plane plane,
 	int pixpg = (color_mode &
 		(OMAP_DSS_COLOR_YUV2 | OMAP_DSS_COLOR_UYVY)) ? 2 : 1;
 	unsigned long tiler_width, tiler_height;
+	unsigned ovl_fifo_size;
 	u32 fifo_high, fifo_low;
 
 	DSSDBG("dispc_setup_plane %d, pa %x, sw %d, %d,%d, %d/%dx%d/%d -> "
@@ -2454,11 +2395,12 @@ int dispc_setup_plane(enum omap_plane plane,
 	_dispc_set_pre_mult_alpha(plane, pre_mult_alpha);
 	_dispc_setup_global_alpha(plane, global_alpha);
 
+	ovl_fifo_size = dispc_get_plane_fifo_size(plane);
+	
 	if (cpu_is_omap44xx()) {
-		fifo_low = dispc_calculate_threshold(plane, paddr + offset0,
-				   puv_addr + offset0, width, height,
-				   row_inc, pix_inc);
-		fifo_high = dispc_get_plane_fifo_size(plane) - 1;
+		/* optimization of power consumption for OMAP4 */
+		fifo_low = (ovl_fifo_size / 2);
+		fifo_high = ovl_fifo_size - 16;
 		dispc_setup_plane_fifo(plane, fifo_low, fifo_high);
 	}
 
@@ -2842,6 +2784,54 @@ bool dispc_trans_key_enabled(enum omap_channel ch)
 	return enabled;
 }
 
+#ifdef CONFIG_OMAP2_DSS_GAMMA_CONTROL
+/* valid inputs for gamma are from 1 to 10 that map
+  from 0.2 to 2.2 gamma values and 0 for disabled */
+int dispc_enable_gamma(enum omap_channel ch, u8 gamma)
+{
+#ifdef CONFIG_ARCH_OMAP4
+	bool enabled;
+	u32 i, temp, channel;
+	static bool enable[MAX_DSS_MANAGERS];
+
+	enabled = enable[ch];
+
+	switch (ch) {
+	case OMAP_DSS_CHANNEL_LCD:
+		channel = 0;
+		break;
+	case OMAP_DSS_CHANNEL_LCD2:
+		channel = 1;
+		break;
+	case OMAP_DSS_CHANNEL_DIGIT:
+		channel = 2;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (gamma > NO_OF_GAMMA_TABLES || gamma < 0)
+		return -EINVAL;
+
+	if (gamma) {
+		u8 *tablePtr = gamma_table[gamma - 1];
+
+		for (i = 0; i < GAMMA_TBL_SZ; i++) {
+			temp =  tablePtr[i];
+			temp =  (i<<24)|(temp|(temp<<8)|(temp<<16));
+			dispc_write_reg(DISPC_GAMMA_TABLE + (channel*4), temp);
+		}
+	}
+	enabled = enabled & ~(1 << channel) | (gamma ? (1 << channel) : 0);
+	REG_FLD_MOD(DISPC_CONFIG, (enabled & 1), 3, 3);
+	REG_FLD_MOD(DISPC_CONFIG, !!(enabled & 6), 9, 9);
+
+	enable[ch] = enabled;
+
+#endif
+	return 0;
+}
+#endif
 
 void dispc_set_tft_data_lines(enum omap_channel channel, u8 data_lines)
 {
