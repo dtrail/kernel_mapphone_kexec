@@ -6,10 +6,6 @@ echo "Cleaning out kernel source directory..."
 make mrproper
 make ARCH=arm distclean
 
-# Switch to kernel folder
-echo "Entering kernel source..."
-cd ~/razr_kdev_kernel/android_kernel_motorola_omap4-common
-
 # Exporting the toolchain (You may change this to your local toolchain location)
 echo "Starting configuration of kernel..."
 export PATH=~/build/prebuilt/linux-x86/toolchain/arm-eabi-4.4.3/bin:$PATH
