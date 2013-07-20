@@ -181,3 +181,4 @@ similar solution is used.  Instead of starting the CRC computation with
 a remainder of 0, an initial remainder of all ones is used.  As long as
 you start the same way on decoding, it doesn't make a difference.
 
+
