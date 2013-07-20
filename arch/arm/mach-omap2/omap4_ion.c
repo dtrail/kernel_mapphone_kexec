@@ -100,7 +100,7 @@ void __init omap_ion_init(void)
 
 	if (system_512m) {
 		omap4_ion_heap_secure_input_size = 0;
-		omap4_ducati_heap_size = (SZ_1M * 83);
+		omap4_ducati_heap_size = (SZ_1M * 55);
 		omap4_ion_heap_nonsec_tiler_mem_size = 0;
 		omap4_ion_heap_tiler_mem_size = 0;
         } else {
@@ -115,16 +115,25 @@ void __init omap_ion_init(void)
         }
 
 	/* carveout addresses */
-	omap4_smc_addr = PLAT_PHYS_OFFSET + omap_total_ram_size() -
-				omap4_smc_size;
-	omap4_ion_heap_secure_input_addr = omap4_smc_addr -
-				omap4_ion_heap_secure_input_size;
-	omap4_ducati_heap_addr = omap4_ion_heap_secure_input_addr -
-				omap4_ducati_heap_size;
-	omap4_ion_heap_tiler_mem_addr = omap4_ducati_heap_addr -
-				omap4_ion_heap_tiler_mem_size;
-	omap4_ion_heap_nonsec_tiler_mem_addr = omap4_ion_heap_tiler_mem_addr -
-				omap4_ion_heap_nonsec_tiler_mem_size;
+	if (system_512m) {
+		omap4_ducati_heap_addr = PLAT_PHYS_OFFSET + omap_total_ram_size() - omap4_ducati_heap_size;
+		omap4_smc_addr = omap4_ducati_heap_addr - omap4_smc_size;
+		omap4_ion_heap_secure_input_addr = omap4_smc_addr - omap4_ion_heap_secure_input_size;
+		omap4_ion_heap_tiler_mem_addr = omap4_ion_heap_secure_input_addr - omap4_ion_heap_tiler_mem_size;
+		omap4_ion_heap_nonsec_tiler_mem_addr = omap4_ion_heap_tiler_mem_addr -
+					omap4_ion_heap_nonsec_tiler_mem_size;
+	} else {
+		omap4_smc_addr = PLAT_PHYS_OFFSET + omap_total_ram_size() -
+					omap4_smc_size;
+		omap4_ion_heap_secure_input_addr = omap4_smc_addr -
+					omap4_ion_heap_secure_input_size;
+		omap4_ducati_heap_addr = omap4_ion_heap_secure_input_addr -
+					omap4_ducati_heap_size;
+		omap4_ion_heap_tiler_mem_addr = omap4_ducati_heap_addr -
+					omap4_ion_heap_tiler_mem_size;
+		omap4_ion_heap_nonsec_tiler_mem_addr = omap4_ion_heap_tiler_mem_addr -
+					omap4_ion_heap_nonsec_tiler_mem_size;
+	}
 
 	pr_info("omap4_total_ram_size = 0x%x\n" \
 				"omap4_smc_size = 0x%x\n"  \
@@ -173,14 +182,6 @@ void __init omap_ion_init(void)
 					__func__, h->name, h->id,
 					h->base, h->base + h->size, h->size);
 	}
-
-#ifndef CONFIG_OMAP_RAM_CONSOLE
-	/* XXX this appears to be extraneous; need to follow up with TI */
-	memblock_remove(OMAP4_RAMCONSOLE_START, OMAP4_RAMCONSOLE_SIZE);
-	pr_debug("%s: RAMCONSOLE size=%dMB, addr=0x%x\n",
-		__func__, (OMAP4_RAMCONSOLE_SIZE >> 20),
-		(unsigned int)OMAP4_RAMCONSOLE_START);
-#endif
 
 	for (i = 0; i < omap4_ion_data.nr; i++)
 		if (omap4_ion_data.heaps[i].type == ION_HEAP_TYPE_CARVEOUT ||

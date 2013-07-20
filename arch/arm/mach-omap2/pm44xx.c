@@ -79,10 +79,21 @@ static struct clockdomain *tesla_clkdm;
 static struct powerdomain *tesla_pwrdm;
 
 static struct clockdomain *emif_clkdm, *mpuss_clkdm;
+static struct clockdomain *abe_clkdm; 
 static int need_sar_restore;
 
-/* Yet un-named erratum which requires AUTORET to be disabled for IVA PD */
+/* Yet un-named erratum which requires AUTORET to be disabled for IVA PD
+ *
+ * NOTE: This erratum is disabled and replaced with updated work-around relaxing
+* constraint of always holding IVA AUTO RET disabled (now only before OFF),
+ * which in turn was preventing IVA VDD from reaching RET and SYS_CLK from
+ * being automatically gated in idle path. This previous work-around code is
+ * kept and maintained for reference until Errata documentation is updated.
+ * TODO: Once final Errata documentation is available, remove reference to this
+ * previous IVA AUTO RET erratum.
+ */ 
 #define OMAP4_PM_ERRATUM_IVA_AUTO_RET_iXXX	BIT(1)
+
 /*
 * HSI - OMAP4430-2.2BUG00055:
 * HSI: DSP Swakeup generated is the same than MPU Swakeup.
@@ -107,10 +118,85 @@ static int need_sar_restore;
  */
 #define OMAP4_PM_ERRATUM_MPU_EMIF_NO_DYNDEP_IDLE_iXXX	BIT(4)
 
-u8 pm44xx_errata;
+/*
+ * There is a HW bug in CMD PHY which gives ISO signals as same for both
+ * PADn and PADp on differential IO pad, because of which IO leaks higher
+ * as pull controls are differential internally and pull value does not
+ * match A value.
+ * Though there is no functionality impact due to this bug, it is seen
+ * that by disabling the pulls there is a savings ~500uA in OSWR, but draws
+ * ~300uA more during OFF mode.
+ * To save power during both idle/suspend following approach taken:
+ * 1) Enable WA during boot-up.
+ * 2) Disable WA while attempting suspend and enable during resume.
+ *
+ * CDDS no: OMAP4460-1.0BUG00291 (OMAP official errata ID yet to be available).
+ */
+#define OMAP4_PM_ERRATUM_LPDDR_CLK_IO_iXXX		BIT(5)
+#define LPDDR_WD_PULL_DOWN				0x02
+
+/*
+ * AUTO RET for IVA VDD Cannot be permanently enabled during OFF mode due to
+ * potential race between IVA VDD entering RET and start of Device OFF mode.
+ *
+ * It is mandatory to have AUTO RET for IVA VDD exlusive with Devide OFF mode.
+ * In order to avoid lockup in OFF mode sequence, system must ensure IVA
+ * voltage domain transitions straight from stable ON to OFF.
+ *
+ * In addition, management of IVA VDD SmartReflex sensor at exit of idle path
+ * may introduce a misalignment between IVA Voltage Controller state and IVA
+ * PRCM voltage FSM based on following identified scenario:
+ *
+ * IVA Voltage Controller is woken-up due to SmartReflex management while
+ * IVA PRCM voltage FSM stays in RET in absence of any IVA module wake-up event
+ * (which is not systematic in idle path as opposed to MPU and CORE VDDs being
+ * necessarily woken up with MPU and CORE PDs).
+ *
+ * NOTE: This updated work-around relaxes constraint of always holding
+ * IVA AUTO RET disabled (now only before OFF), which in turn was preventing
+ * IVA VDD from reaching RET and SYS_CLK from being automatically gated in
+ * idle path. Ensure previous work-around code is kept and maintained for
+ * reference until Errata documentation is updated.
+ * TODO: Once this is available, update with final iXXX Errata number.
+ *
+ * WA involves:
+ * Ensure stable ON-OFF transition for IVA VDD during OFF mode sequence.
+ * Ensure VCON and PRCM FSM are synced despite IVA SR handling in idle path.
+ * 1) AUTO RET for IVA VDD is enabled entering in idle path, disabled exiting
+ *   idle path and IVA VDD is always woken-up with a SW dummy wakeup.
+ * 2) OFF mode is enabled only in Suspend path.
+ * 3) AUTO RET for IVA VDD remains disabled in Suspend path (before OFF mode).
+ */
+#define OMAP4_PM_ERRATUM_IVA_AUTO_RET_IDLE_iXXX        BIT(8)
+static int iva_toggle_wa_applied;
+
+u16 pm44xx_errata; 
 #define is_pm44xx_erratum(erratum) (pm44xx_errata & OMAP4_PM_ERRATUM_##erratum)
 
 #define MAX_IOPAD_LATCH_TIME 1000
+
+void syscontrol_lpddr_clk_io_errata(bool enable)
+{
+	u32 v = 0;
+
+	if (!is_pm44xx_erratum(LPDDR_CLK_IO_iXXX))
+		return;
+
+	v = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO1_2);
+	if (enable)
+		v &= ~OMAP4_LPDDR2IO1_GR10_WD_MASK;
+	else
+		v |= LPDDR_WD_PULL_DOWN << OMAP4_LPDDR2IO1_GR10_WD_SHIFT;
+	omap4_ctrl_pad_writel(v, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO1_2);
+
+	v = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO2_2);
+	if (enable)
+		v &= ~OMAP4_LPDDR2IO2_GR10_WD_MASK;
+	else
+		v |= LPDDR_WD_PULL_DOWN << OMAP4_LPDDR2IO1_GR10_WD_SHIFT;
+	omap4_ctrl_pad_writel(v, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO2_2);
+}
+
 void omap4_trigger_ioctrl(void)
 {
 	int i = 0;
@@ -229,9 +315,29 @@ void omap4_enter_sleep(unsigned int cpu, unsigned int power_state, bool suspend)
 			goto abort_device_off;
 		omap_vc_set_auto_trans(core_voltdm,
 			OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
-		if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
-			omap_vc_set_auto_trans(iva_voltdm,
-			  OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
+
+    /*
+     * Do not enable IVA AUTO-RET if device targets OFF mode.
+     * In such case, purpose of IVA AUTO-RET WA is to ensure
+     * IVA domain goes straight from stable Voltage ON to OFF.
+     */
+    if (is_pm44xx_erratum(IVA_AUTO_RET_IDLE_iXXX)) {
+      if (!omap4_device_next_state_off())
+        omap_vc_set_auto_trans(iva_voltdm,
+        OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
+    /* Normal path without IVA AUTO RET IDLE work-around applied */
+    } else {
+      /*
+       * Note: The previous erratum is deactivated and replaced
+       * with updated work-around in idle path which relaxes
+       * constraint of always holding IVA AUTO RET disabled
+       * (now only before OFF). Code is kept and maintained for
+       * reference until Errata is updated.
+       */
+      if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
+        omap_vc_set_auto_trans(iva_voltdm,
+        OMAP_VC_CHANNEL_AUTO_TRANSITION_RETENTION);
+      } 
 		}
 
 		omap_temp_sensor_prepare_idle();
@@ -247,6 +353,12 @@ void omap4_enter_sleep(unsigned int cpu, unsigned int power_state, bool suspend)
 		omap4_pm_suspend_save_regs();
 
 	if (omap4_device_next_state_off()) {
+    /* Proceed with OFF mode sequence only if WA is applied */
+    if (is_pm44xx_erratum(IVA_AUTO_RET_IDLE_iXXX)) {
+      if (!iva_toggle_wa_applied)
+        goto abort_device_off;
+    }
+
 		/* Save the device context to SAR RAM */
 		if (omap4_sar_save()) {
 			need_sar_restore = 0;
@@ -263,7 +375,13 @@ void omap4_enter_sleep(unsigned int cpu, unsigned int power_state, bool suspend)
 			OMAP4430_PRM_DEVICE_INST, OMAP4_PRM_IO_PMCTRL_OFFSET);
 	}
 
+	if (suspend)
+		syscontrol_lpddr_clk_io_errata(false);
+
 	omap4_enter_lowpower(cpu, power_state);
+
+	if (suspend)
+		syscontrol_lpddr_clk_io_errata(true);
 
 	if (omap4_device_prev_state_off()) {
 		/* Reconfigure the trim settings as well */
@@ -280,9 +398,47 @@ abort_device_off:
 		/* See note above */
 		omap_vc_set_auto_trans(core_voltdm,
 				OMAP_VC_CHANNEL_AUTO_TRANSITION_DISABLE);
-		if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
-			omap_vc_set_auto_trans(iva_voltdm,
+
+    if (is_pm44xx_erratum(IVA_AUTO_RET_IDLE_iXXX)) {
+      if (omap_vc_set_auto_trans(iva_voltdm,
+        OMAP_VC_CHANNEL_AUTO_TRANSITION_DISABLE)){
+        pr_err("%s: Failed to disable autoret for %s\n",
+          __func__, iva_voltdm->name);
+        iva_toggle_wa_applied = 0;
+      /*
+       * Ensure PRCM IVA Voltage FSM is ON upon exit of idle.
+       * Upon successful IVA AUTO-RET disabling, trigger a
+       * Dummy SW Wakup on IVA domain. Later on, upon enabling
+       * of IVA Smart-Reflex, IVA Voltage Controller state will
+       * be ON as well. Both FSMs would now be aligned and safe
+       * during active and for further attempts to Device OFF
+       * mode for which IVA would go straight from ON to OFF.
+       */
+      } else {
+        /* Configures ABE clockdomain in SW_WKUP */
+        if (clkdm_wakeup(abe_clkdm)) {
+          pr_err("%s: Failed to force wakeup of %s\n",
+            __func__, abe_clkdm->name);
+          iva_toggle_wa_applied = 0;
+        /* Configures ABE clockdomain back to HW_AUTO */
+        } else {
+          clkdm_allow_idle(abe_clkdm);
+          iva_toggle_wa_applied = 1;
+        }
+      }
+    /* Normal path without IVA AUTO RET IDLE work-around applied */
+    } else {
+      /*
+       * Note: The previous erratum is deactivated and replaced
+       * with updated work-around in idle path which relaxes
+       * constraint of always holding IVA AUTO RET disabled
+       * (now only before OFF). Code is kept and maintained for
+       * reference until Errata is updated.
+       */
+      if (!is_pm44xx_erratum(IVA_AUTO_RET_iXXX)) {
+        omap_vc_set_auto_trans(iva_voltdm, 
 				OMAP_VC_CHANNEL_AUTO_TRANSITION_DISABLE);
+	 } 
 		}
 
 		omap_temp_sensor_resume_idle();
@@ -858,7 +1014,7 @@ int omap4_pm_cold_reset(char *reason)
 	/* Switch ON all pwrst registers */
 	list_for_each_entry(pwrst, &pwrst_list, node) {
 		if (pwrst->pwrdm->pwrsts_logic_ret)
-			pwrdm_set_logic_retst(pwrst->pwrdm, PWRDM_POWER_ON);
+			pwrdm_set_logic_retst(pwrst->pwrdm, PWRDM_POWER_RET);
 		if (pwrst->pwrdm->pwrsts)
 			omap_set_pwrdm_state(pwrst->pwrdm, PWRDM_POWER_ON);
 	}
@@ -985,9 +1141,11 @@ static void __init syscontrol_setup_regs(void)
 	v |= OMAP4_LPDDR21_VREF_AUTO_EN_CA_MASK | OMAP4_LPDDR21_VREF_AUTO_EN_DQ_MASK;
         omap4_ctrl_pad_writel(v, OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO2_3);
 
+	syscontrol_lpddr_clk_io_errata(true);
+	
 	/*
-	 * Workaround for CK differential IO PADn, PADp values due to bug in
-	 * EMIF CMD phy.
+	 * dtrail:  Workaround for CK differential IO PADn, PADp values due to bug in
+	 * 			EMIF CMD phy.
 	 */
 	v = omap4_ctrl_pad_readl(OMAP4_CTRL_MODULE_PAD_CORE_CONTROL_LPDDR2IO1_2);
 	v &= ~OMAP4_LPDDR2IO1_GR10_WD_MASK;
@@ -1310,8 +1468,12 @@ static void __init omap4_pm_setup_errata(void)
 	 * all OMAP4 silica
 	 */
 	if (cpu_is_omap44xx())
-		pm44xx_errata |= OMAP4_PM_ERRATUM_IVA_AUTO_RET_iXXX |
-				 OMAP4_PM_ERRATUM_HSI_SWAKEUP_iXXX;
+		pm44xx_errata |= OMAP4_PM_ERRATUM_IVA_AUTO_RET_IDLE_iXXX | 
+				 OMAP4_PM_ERRATUM_HSI_SWAKEUP_iXXX |
+				 OMAP4_PM_ERRATUM_LPDDR_CLK_IO_iXXX;
+
+	  iva_toggle_wa_applied = 0;
+
 	/* Dynamic Dependency errata for all silicon !=443x */
 	if (cpu_is_omap443x())
 		pm44xx_errata |= OMAP4_PM_ERRATUM_MPU_EMIF_NO_DYNDEP_i688;
@@ -1328,7 +1490,7 @@ static void __init omap4_pm_setup_errata(void)
 static int __init omap4_pm_init(void)
 {
 	int ret = 0;
-	struct clockdomain *l3_1_clkdm;
+	struct clockdomain *l3_1_clkdm, *l4wkup;
 	struct clockdomain *ducati_clkdm, *l3_2_clkdm, *l4_per, *l4_cfg;
 
 	if (!cpu_is_omap44xx())
@@ -1377,16 +1539,25 @@ static int __init omap4_pm_init(void)
 	 * doesn't work as expected. The hardware recommendation is
 	 * to keep above dependencies. Without this system locks up or
 	 * randomly crashes.
+	 *
+	 * On 44xx:
+	 * The L4 wakeup depedency is added to workaround the OCP sync hardware
+	 * BUG with 32K synctimer which lead to incorrect timer value read
+	 * from the 32K counter. The BUG applies for GPTIMER1 and WDT2 which
+	 * are part of L4 wakeup clockdomain.
 	 */
 	mpuss_clkdm = clkdm_lookup("mpuss_clkdm");
 	emif_clkdm = clkdm_lookup("l3_emif_clkdm");
+	abe_clkdm = clkdm_lookup("abe_clkdm"); 
 	l3_1_clkdm = clkdm_lookup("l3_1_clkdm");
 	l3_2_clkdm = clkdm_lookup("l3_2_clkdm");
 	ducati_clkdm = clkdm_lookup("ducati_clkdm");
 	l4_per = clkdm_lookup("l4_per_clkdm");
 	l4_cfg = clkdm_lookup("l4_cfg_clkdm");
-	if ((!mpuss_clkdm) || (!emif_clkdm) || (!l3_1_clkdm) ||
-		(!l3_2_clkdm) || (!ducati_clkdm) || (!l4_per) || (!l4_cfg))
+	l4wkup = clkdm_lookup("l4_wkup_clkdm");
+	if ((!mpuss_clkdm) || (!emif_clkdm) || (!l3_1_clkdm) || (!l4wkup) ||
+	(!l3_2_clkdm) || (!ducati_clkdm) || (!l4_per) || (!l4_cfg) ||
+	    (!abe_clkdm)) 
 		goto err2;
 
 	/* if we cannot ever enable static dependency. */
@@ -1402,6 +1573,7 @@ static int __init omap4_pm_init(void)
 		ret |= clkdm_add_wkdep(mpuss_clkdm, l4_cfg);
 		ret |= clkdm_add_wkdep(ducati_clkdm, l4_per);
 		ret |= clkdm_add_wkdep(ducati_clkdm, l4_cfg);
+		ret |= clkdm_add_wkdep(mpuss_clkdm, l4wkup);
 		if (ret) {
 			pr_err("Failed to add MPUSS -> L3/EMIF, DUCATI -> L3"
 			       " and MPUSS -> L4* wakeup dependency\n");
@@ -1419,6 +1591,7 @@ static int __init omap4_pm_init(void)
 		/* There appears to be a problem between the MPUSS and L3_1 */
 		ret |= clkdm_add_wkdep(mpuss_clkdm, l3_1_clkdm);
 		ret |= clkdm_add_wkdep(mpuss_clkdm, l3_2_clkdm);
+		ret |= clkdm_add_wkdep(mpuss_clkdm, l4wkup);
 
 		/* There appears to be a problem between the Ducati and L3/L4 */
 		ret |= clkdm_add_wkdep(ducati_clkdm, l3_1_clkdm);

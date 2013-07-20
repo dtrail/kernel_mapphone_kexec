@@ -693,4 +693,37 @@ source "drivers/misc/radio_ctrl/Kconfig"
 source "drivers/misc/ts27010mux/Kconfig"
 source "drivers/misc/gc-core/Kconfig"
 
+config LIVE_OC
+        bool "Support for Live OC"
+        default y
+        help
+          Say Y here to enable Live OC
+
+config OMAP_TEMP_CONTROL
+	bool "Enable support for Temp Control"
+	depends on OMAP_DIE_TEMP_SENSOR
+	default y
+	help
+	  Enable support for Temp Control
+
+
+config FSYNC_CONTROL
+        bool "Support for FSync Control"
+        default y
+        help
+          Say Y here to enable FSync Control
+
+config BLX
+       bool "Support for Battery Life eXtender"
+       default y
+       help
+         Say Y here to enable Battery Life eXtender
+
+config VIBRATOR_CONTROL
+       bool "Support for Vibrator Control"
+       default y
+       help
+	 Say Y here to enable Vibrator Control
+
+
 endif # MISC_DEVICES

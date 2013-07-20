@@ -38,6 +38,10 @@
 #include "clock.h"
 #include "omap2plus-cpufreq.h"
 
+#ifdef CONFIG_FORCE_FAST_CHARGE
+#include <linux/fastchg.h>
+#endif
+
 #define MAPPHONE_BP_READY2_AP_GPIO      59
 #define MAPPHONE_IPC_USB_SUSP_GPIO	95
 #define DIE_ID_REG_BASE			(L4_34XX_PHYS + 0xA000)
@@ -73,7 +77,7 @@ static struct android_usb_platform_data andusb_plat = {
 	.product_name	= "Android",
 	.android_pid	= mot_android_pid,
 	.nluns			= 1,
-	.cdrom_lun_num          = 0,
+	.cdrom_lun_num          = 2, // Was 0, but we'll just default to 2 now for all devices.
 };
 
 static void set_usb_performance_mode(struct device *dev, bool enabled)
@@ -126,7 +130,12 @@ static int cpcap_usb_connected_probe(struct platform_device *pdev)
 	} else {
 		android_usb_set_connected(1, pdata->accy);
 #if defined(CONFIG_USB_MOT_ANDROID) && defined(CONFIG_USB_MUSB_OTG)
+
+#ifdef CONFIG_FORCE_FAST_CHARGE
+
+#else
 		cpcap_musb_notifier_call(USB_EVENT_VBUS);
+#endif
 #endif
 	}
 

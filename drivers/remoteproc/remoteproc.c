@@ -754,7 +754,11 @@ static int rproc_add_mem_entry(struct rproc *rproc, struct fw_resource *rsc)
 		 * carveouts we don't care about in a core dump.
 		 * Perhaps the ION carveout should be reported as RSC_DEVMEM.
 		 */
+#ifdef CONFIG_VIDEO_OMAP_DCE
+		me->core = (rsc->type == RSC_CARVEOUT && rsc->pa != 0x80000000);
+#else
 		me->core = (rsc->type == RSC_CARVEOUT && rsc->pa != 0xbe900000);
+#endif
 #endif
 	}
 
@@ -791,7 +795,8 @@ static int rproc_check_poolmem(struct rproc *rproc, u32 size, phys_addr_t pa)
 	}
 
 	if (pa < pool->st_base || pa + size > pool->st_base + pool->st_size) {
-		pr_warn("section size does not fit within carveout memory\n");
+		pr_warn("section size does not fit within carveout memory pa(0x%x:0x%x) pool(0x%x:0x%x)\n",
+			pa, size, pool->st_base, pool->st_size);
 		return -ENOSPC;
 	}
 
@@ -876,6 +881,9 @@ static int rproc_handle_resources(struct rproc *rproc, struct fw_resource *rsc,
 				}
 				rsc->pa = pa;
 			} else {
+#ifdef CONFIG_VIDEO_OMAP_DCE
+				if (strcmp(rsc->name, "IPU_MEM_IOBUFS") != 0)
+#endif
 				ret = rproc_check_poolmem(rproc, rsc->len, pa);
 				if (ret) {
 					dev_err(dev, "static memory for %s "

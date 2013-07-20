@@ -14,13 +14,36 @@
 #include <mach/emif.h>
 #include <mach/lpddr2-elpida.h>
 
+const struct lpddr2_timings lpddr2_elpida_timings_466_mhz = {
+  .max_freq  = 466666666,
+  .RL        = 7,
+  .tRPab     = 14,
+  .tRCD      = 14,
+  .tWR       = 10,
+  .tRASmin   = 30,
+  .tRRD      = 10,
+  .tWTRx2    = 15,
+  .tXSR      = 140,
+  .tXPx2     = 15,
+  .tRFCab    = 130,
+  .tRTPx2    = 15,
+  .tCKE      = 3,
+  .tCKESR    = 15,
+  .tZQCS     = 90,
+  .tZQCL     = 360,
+  .tZQINIT   = 1000,
+  .tDQSCKMAXx2  = 11,
+  .tRASmax   = 70,
+  .tFAW      = 50,
+};
+
 const struct lpddr2_timings lpddr2_elpida_timings_400_mhz = {
 	.max_freq	= 400000000,
-	.RL		= 6,
-	.tRPab		= 21,
-	.tRCD		= 18,
-	.tWR		= 15,
-	.tRASmin	= 42,
+  	.RL      	= 5,
+	.tRPab   	= 14,
+	.tRCD    	= 14,
+	.tWR     	= 10,
+	.tRASmin 	= 30,
 	.tRRD		= 10,
 	.tWTRx2		= 15,
 	.tXSR		= 140,
@@ -62,11 +85,11 @@ const struct lpddr2_timings lpddr2_elpida_timings_333_mhz = {
 
 const struct lpddr2_timings lpddr2_elpida_timings_200_mhz = {
 	.max_freq	= 200000000,
-	.RL		= 3,
-	.tRPab		= 21,
-	.tRCD		= 18,
-	.tWR		= 15,
-	.tRASmin	= 42,
+  	.RL      	= 3,
+	.tRPab   	= 14,
+	.tRCD    	= 14,
+	.tWR     	= 10,
+	.tRASmin 	= 30,
 	.tRRD		= 10,
 	.tWTRx2		= 20,
 	.tXSR		= 140,
@@ -102,11 +125,26 @@ struct lpddr2_device_info lpddr2_elpida_2G_S4_dev = {
 	.device_timings = {
 		&lpddr2_elpida_timings_200_mhz,
 		&lpddr2_elpida_timings_333_mhz,
-		&lpddr2_elpida_timings_400_mhz
+		&lpddr2_elpida_timings_400_mhz,
+		&lpddr2_elpida_timings_466_mhz,
 	},
 	.min_tck	= &lpddr2_elpida_min_tck,
 	.type		= LPDDR2_TYPE_S4,
 	.density	= LPDDR2_DENSITY_2Gb,
+	.io_width	= LPDDR2_IO_WIDTH_32,
+	.emif_ddr_selfrefresh_cycles = 262144,
+};
+
+struct lpddr2_device_info lpddr2_elpida_4G_S4_dev = {
+	.device_timings = {
+		&lpddr2_elpida_timings_200_mhz,
+		&lpddr2_elpida_timings_333_mhz,
+		&lpddr2_elpida_timings_400_mhz,
+		&lpddr2_elpida_timings_466_mhz,
+	},
+	.min_tck	= &lpddr2_elpida_min_tck,
+	.type		= LPDDR2_TYPE_S4,
+	.density	= LPDDR2_DENSITY_4Gb,
 	.io_width	= LPDDR2_IO_WIDTH_32,
 	.emif_ddr_selfrefresh_cycles = 262144,
 };

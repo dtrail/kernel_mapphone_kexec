@@ -461,6 +461,7 @@ static void __init omap4_check_revision(void)
 			omap_chip.oc |= CHIP_IS_OMAP4430ES2_3;
 		}
 		break;
+
 	case 0xb94e:
 		switch (rev) {
 		case 0:

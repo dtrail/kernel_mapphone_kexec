@@ -690,7 +690,6 @@ static unsigned int __init get_ap_ddr_size(void)
 	return sz;
 }
 
-
 static void __init mapphone_voltage_init(void)
 {
 	struct device_node *node;
@@ -952,6 +951,13 @@ static void mapphone_pm_reset(void)
 {
 	arch_reset('h', NULL);
 }
+
+#ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
+int set_two_phase_freq(int cpufreq);
+#endif
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+int id_set_two_phase_freq(int cpufreq);
+#endif
 
 static int cpcap_charger_connected_probe(struct platform_device *pdev)
 {
@@ -1288,6 +1294,12 @@ static void __init mapphone_init(void)
 	omap4_i2c_init();
 	mapphone_voltage_init();
 	mapphone_omap44xx_padconf_init();
+#ifdef CONFIG_CPU_FREQ_GOV_ONDEMAND_2_PHASE
+set_two_phase_freq(800000);
+#endif
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+id_set_two_phase_freq(800000);
+#endif
 
 #ifdef CONFIG_EMU_UART_DEBUG
 	/* emu-uart function will override devtree iomux setting */
@@ -1361,8 +1373,12 @@ static void __init mapphone_reserve(void)
 	mapphone_android_display_setup(NULL);
 #endif
 
-	omap_ram_console_init(OMAP4_RAMCONSOLE_START,
-			OMAP4_RAMCONSOLE_SIZE);
+	if (omap_total_ram_size() <= SZ_512M)
+		omap_ram_console_init(OMAP_RAM_CONSOLE_START_DEFAULT,
+				OMAP_RAM_CONSOLE_SIZE_DEFAULT);
+	else
+		omap_ram_console_init(OMAP_RAM_CONSOLE_1GB_START_DEFAULT,
+				OMAP_RAM_CONSOLE_1GB_SIZE_DEFAULT);
 
 	/* do the static reservations first */
 	memblock_remove(PHYS_ADDR_SMC_MEM, PHYS_ADDR_SMC_SIZE);

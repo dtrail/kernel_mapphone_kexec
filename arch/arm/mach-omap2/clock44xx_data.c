@@ -38,6 +38,10 @@
 #include "control.h"
 #include "scrm44xx.h"
 
+#ifdef CONFIG_LIVE_OC
+#include <linux/live_oc.h>
+#endif
+
 /* OMAP4 modulemode control */
 #define OMAP4430_MODULEMODE_HWCTRL			0
 #define OMAP4430_MODULEMODE_SWCTRL			1
@@ -45,6 +49,10 @@
 static int omap4_virt_l3_set_rate(struct clk *clk, unsigned long rate);
 static long omap4_virt_l3_round_rate(struct clk *clk, unsigned long rate);
 static unsigned long omap4_virt_l3_recalc(struct clk *clk);
+static int omap4_virt_iva_set_rate(struct clk *clk, unsigned long rate);
+static long omap4_virt_iva_round_rate(struct clk *clk, unsigned long rate);
+static int omap4_virt_dsp_set_rate(struct clk *clk, unsigned long rate);
+static long omap4_virt_dsp_round_rate(struct clk *clk, unsigned long rate);
 
 /* Root clocks */
 static struct clk extalt_clkin_ck = {
@@ -455,6 +463,10 @@ static struct clk dpll_core_ck = {
 	.init		= &omap2_init_dpll_parent,
 	.ops		= &clkops_omap3_core_dpll_ops,
 	.recalc		= &omap3_dpll_recalc,
+#ifdef CONFIG_LIVE_OC
+	.round_rate     = &omap2_dpll_round_rate,
+	.set_rate       = &omap3_noncore_dpll_set_rate,
+#endif
 	.speculate	= &omap2_clksel_speculate,
 };
 
@@ -761,6 +773,30 @@ static struct clk dpll_iva_m5x2_ck = {
 	.speculate	= &omap2_clksel_speculate,
 	.round_rate	= &omap2_clksel_round_rate,
 	.set_rate	= &omap2_clksel_set_rate,
+};
+
+static struct clk virt_iva_ck = {
+	.name		= "virt_iva_ck",
+	.parent		= &dpll_iva_m5x2_ck,
+	.ops		= &clkops_null,
+	.round_rate	= &omap4_virt_iva_round_rate,
+	.set_rate	= &omap4_virt_iva_set_rate,
+};
+
+static struct clk virt_dsp_ck = {
+	.name		= "virt_dsp_ck",
+	.parent		= &dpll_iva_m4x2_ck,
+	.ops		= &clkops_null,
+	.round_rate	= &omap4_virt_dsp_round_rate,
+	.set_rate	= &omap4_virt_dsp_set_rate,
+};
+
+static struct clk virt_lcd_pclk = {
+	.name		= "virt_lcd_pclk",
+	.parent		= NULL,
+	.ops		= &clkops_null,
+	.round_rate	= &clk_dummy_round_rate,
+	.set_rate	= &clk_dummy_set_rate,
 };
 
 /* DPLL_MPU */
@@ -1070,7 +1106,8 @@ static struct dpll_data dpll_usb_dd = {
 	.flags		= DPLL_J_TYPE,
 	.clk_ref	= &sys_clkin_ck,
 	.control_reg	= OMAP4430_CM_CLKMODE_DPLL_USB,
-	.modes		= (1 << DPLL_LOW_POWER_BYPASS) | (1 << DPLL_LOCKED),
+	.modes		= (1 << DPLL_LOW_POWER_BYPASS) | (1 << DPLL_LOCKED)
+			| (1 << DPLL_LOW_POWER_STOP),
 	.autoidle_reg	= OMAP4430_CM_AUTOIDLE_DPLL_USB,
 	.idlest_reg	= OMAP4430_CM_IDLEST_DPLL_USB,
 	.mult_mask	= OMAP4430_DPLL_MULT_MASK,
@@ -3485,6 +3522,9 @@ static struct omap_clk omap44xx_clks[] = {
 	CLK(NULL,	"dpll_iva_x2_ck",		&dpll_iva_x2_ck,	CK_44XX),
 	CLK(NULL,	"dpll_iva_m4x2_ck",		&dpll_iva_m4x2_ck,	CK_44XX),
 	CLK(NULL,	"dpll_iva_m5x2_ck",		&dpll_iva_m5x2_ck,	CK_44XX),
+	CLK(NULL,	"virt_iva_ck",			&virt_iva_ck,	CK_44XX),
+	CLK(NULL,	"virt_dsp_ck",			&virt_dsp_ck,	CK_44XX),
+	CLK(NULL,	"virt_lcd_pclk",		&virt_lcd_pclk,	CK_44XX),
 	CLK(NULL,	"dpll_mpu_ck",			&dpll_mpu_ck,	CK_44XX),
 	CLK(NULL,	"virt_dpll_mpu_ck",		&virt_dpll_mpu_ck,	CK_446X),
 	CLK(NULL,	"dpll_mpu_m2_ck",		&dpll_mpu_m2_ck,	CK_44XX),
@@ -3745,7 +3785,7 @@ static struct omap_clk omap44xx_clks[] = {
 #define DPLL_CORE_M3_OPP50_RATE		200000000
 #define DPLL_CORE_M3_OPP100_RATE	320000000
 #define DPLL_CORE_M6_OPP50_RATE		200000000
-#define DPLL_CORE_M6_OPP100_RATE	266600000
+#define DPLL_CORE_M6_OPP100_RATE	266666666
 #define DPLL_CORE_M7_OPP50_RATE		133333333
 #define DPLL_CORE_M7_OPP100_RATE	266666666
 #define DPLL_PER_M3_OPP50_RATE		192000000
@@ -3805,6 +3845,21 @@ struct virt_l3_ck_deps {
 #define L3_OPP_50_INDEX 0
 #define L3_OPP_100_INDEX 1
 
+#ifdef CONFIG_LIVE_OC
+#define NUM_DEP_CLOCKS 4
+#define MAX_DIVIDER 62
+
+enum depclock_indices {
+    DPLL_CORE_M2_INDEX = 0,
+    DPLL_CORE_M3_INDEX,
+    DPLL_CORE_M6_INDEX,
+    DPLL_CORE_M7_INDEX,
+};
+
+static int dividers[NUM_DEP_CLOCKS * NO_OF_L3_OPPS];
+#endif
+
+
 static struct virt_l3_ck_deps omap4_virt_l3_clk_deps[NO_OF_L3_OPPS] = {
 	{ /* OPP 50 */
 		.core_m2_rate = DPLL_CORE_M2_OPP50_RATE,
@@ -3828,14 +3883,43 @@ static int omap4_virt_l3_set_rate(struct clk *clk, unsigned long rate)
 {
 	struct virt_l3_ck_deps *l3_deps;
 
+#ifdef CONFIG_LIVE_OC
+	unsigned long dpll_corex2_freq;
+
+	int opp;
+
+	if (rate <= (L3_OPP50_RATE / 100) * liveoc_core_ocvalue())
+		opp = L3_OPP_50_INDEX;
+	else
+		opp = L3_OPP_100_INDEX;
+
+	l3_deps = &omap4_virt_l3_clk_deps[opp];
+#else
 	if (rate <= L3_OPP50_RATE)
 		l3_deps = &omap4_virt_l3_clk_deps[L3_OPP_50_INDEX];
 	else
 		l3_deps = &omap4_virt_l3_clk_deps[L3_OPP_100_INDEX];
+#endif
+
+#ifdef CONFIG_LIVE_OC
+	dpll_corex2_freq = dpll_core_x2_ck.rate;
+
+	omap4_clksel_set_rate(&dpll_core_m3x2_ck, 
+			      dpll_corex2_freq / dividers[opp * NUM_DEP_CLOCKS + DPLL_CORE_M3_INDEX]);
+	omap4_clksel_set_rate(&dpll_core_m6x2_ck, 
+			      dpll_corex2_freq / dividers[opp * NUM_DEP_CLOCKS + DPLL_CORE_M6_INDEX]);
+	omap4_clksel_set_rate(&dpll_core_m7x2_ck, 
+			      dpll_corex2_freq / dividers[opp * NUM_DEP_CLOCKS + DPLL_CORE_M7_INDEX]);
+	omap4_clksel_set_rate(&dpll_core_m2_ck, 
+			      dpll_corex2_freq / dividers[opp * NUM_DEP_CLOCKS + DPLL_CORE_M2_INDEX]);
+#else
 
 	omap4_clksel_set_rate(&dpll_core_m3x2_ck, l3_deps->core_m3_rate);
 	omap4_clksel_set_rate(&dpll_core_m6x2_ck, l3_deps->core_m6_rate);
 	omap4_clksel_set_rate(&dpll_core_m7x2_ck, l3_deps->core_m7_rate);
+	omap4_clksel_set_rate(&dpll_core_m2_ck, l3_deps->core_m2_rate);
+#endif
+	omap4_clksel_set_rate(&dpll_core_m5x2_ck, rate * 2);
 	omap4_clksel_set_rate(&dpll_per_m3x2_ck, l3_deps->per_m3_rate);
 	omap4_clksel_set_rate(&dpll_per_m6x2_ck, l3_deps->per_m6_rate);
 	omap4_clksel_set_rate(&dpll_core_m5x2_ck, rate * 2);
@@ -3845,10 +3929,168 @@ static int omap4_virt_l3_set_rate(struct clk *clk, unsigned long rate)
 	return 0;
 }
 
+#define DPLL_IVA_M4_OPP50_RATE		232800000
+#define DPLL_IVA_M4_OPP100_RATE		465500000
+#define DPLL_IVA_M4_OPPTURBO_RATE	496000000
+#define DPLL_IVA_M4_OPPNITRO_RATE	430000000
+#define DPLL_IVA_M4_OPPNITROSB_RATE	500000000
+
+#define DPLL_IVA_M5_OPP50_RATE		133100000
+#define DPLL_IVA_M5_OPP100_RATE		266000000
+#define DPLL_IVA_M5_OPPTURBO_RATE	331000000
+#define DPLL_IVA_M5_OPPNITRO_RATE	430000000
+#define DPLL_IVA_M5_OPPNITROSB_RATE	500000000
+
+#define DPLL_IVA_OPP50_RATE		1862400000
+#define DPLL_IVA_OPP100_RATE		1862400000
+#define DPLL_IVA_OPPTURBO_RATE		992000000
+#define DPLL_IVA_OPPNITRO_RATE		1290000000
+#define DPLL_IVA_OPPNITROSB_RATE	1500000000
+
+struct virt_iva_ck_deps {
+	unsigned long iva_ck_rate;
+	unsigned long dsp_ck_rate;
+	unsigned long iva_dpll_rate;
+};
+
+static struct virt_iva_ck_deps omap4_virt_iva_clk_deps[] = {
+	{ /* OPP 50 */
+		.iva_ck_rate = DPLL_IVA_M5_OPP50_RATE,
+		.dsp_ck_rate = DPLL_IVA_M4_OPP50_RATE,
+		.iva_dpll_rate = DPLL_IVA_OPP50_RATE,
+	},
+	{ /* OPP 100 */
+		.iva_ck_rate = DPLL_IVA_M5_OPP100_RATE,
+		.dsp_ck_rate = DPLL_IVA_M4_OPP100_RATE,
+		.iva_dpll_rate = DPLL_IVA_OPP100_RATE,
+	},
+	{ /* OPP TURBO */
+		.iva_ck_rate = DPLL_IVA_M5_OPPTURBO_RATE,
+		.dsp_ck_rate = DPLL_IVA_M4_OPPTURBO_RATE,
+		.iva_dpll_rate = DPLL_IVA_OPPTURBO_RATE,
+	},
+	{ /* OPP NITRO */
+		.iva_ck_rate = DPLL_IVA_M5_OPPNITRO_RATE,
+		.dsp_ck_rate = DPLL_IVA_M4_OPPNITRO_RATE,
+		.iva_dpll_rate = DPLL_IVA_OPPNITRO_RATE,
+	},
+	{ /* OPP NITROSB */
+		.iva_ck_rate = DPLL_IVA_M5_OPPNITROSB_RATE,
+		.dsp_ck_rate = DPLL_IVA_M4_OPPNITROSB_RATE,
+		.iva_dpll_rate = DPLL_IVA_OPPNITROSB_RATE,
+	},
+};
+
+static long omap4_virt_iva_round_rate(struct clk *clk, unsigned long rate)
+{
+	struct virt_iva_ck_deps *iva_deps = NULL;
+	long last_diff = LONG_MAX;
+	int i;
+
+	if (!clk)
+		return 0;
+
+	for (i = 0; i < ARRAY_SIZE(omap4_virt_iva_clk_deps); i++) {
+		long diff;
+		iva_deps = &omap4_virt_iva_clk_deps[i];
+		diff = abs(rate - iva_deps->iva_ck_rate);
+		if (diff >= last_diff) {
+			iva_deps = &omap4_virt_iva_clk_deps[i-1];
+			break;
+		}
+		last_diff = diff;
+	}
+
+	if (!iva_deps)
+		return 0;
+
+	return iva_deps->iva_ck_rate;
+}
+
+static int omap4_virt_iva_set_rate(struct clk *clk, unsigned long rate)
+{
+	struct virt_iva_ck_deps *iva_deps = NULL;
+	long next_iva_dpll_rate;
+	int i, ret = 0;
+	struct clk *iva_ck = &dpll_iva_m5x2_ck;
+	struct clk *dsp_ck = &dpll_iva_m4x2_ck;
+	struct clk *dpll_ck = &dpll_iva_ck;
+
+	if (!clk)
+		return -EINVAL;
+
+	for (i = 0; i < ARRAY_SIZE(omap4_virt_iva_clk_deps); i++)
+		if (rate == omap4_virt_iva_clk_deps[i].iva_ck_rate)
+			break;
+
+	if (i < ARRAY_SIZE(omap4_virt_iva_clk_deps))
+		iva_deps = &omap4_virt_iva_clk_deps[i];
+	else
+		return -EINVAL;
+
+	next_iva_dpll_rate = dpll_ck->round_rate(dpll_ck,
+			iva_deps->iva_dpll_rate / 2);
+
+	if (next_iva_dpll_rate == dpll_ck->rate)
+		goto set_clock_rates;
+	else if (next_iva_dpll_rate < dpll_ck->rate)
+		goto set_dpll_rate;
+
+	if (iva_deps->iva_ck_rate < iva_ck->rate) {
+		ret = omap4_clksel_set_rate(iva_ck, iva_deps->iva_ck_rate);
+		if (ret)
+			goto out;
+	}
+
+	if (iva_deps->dsp_ck_rate < dsp_ck->rate) {
+		ret = omap4_clksel_set_rate(dsp_ck, iva_deps->dsp_ck_rate);
+		if (ret)
+			goto out;
+	}
+
+set_dpll_rate:
+	ret = dpll_ck->set_rate(dpll_ck, next_iva_dpll_rate);
+	if (ret)
+		goto out;
+
+	propagate_rate(dpll_ck);
+
+set_clock_rates:
+	ret = omap4_clksel_set_rate(iva_ck, iva_deps->iva_ck_rate);
+	if (ret)
+		goto out;
+
+	ret = omap4_clksel_set_rate(dsp_ck, iva_deps->dsp_ck_rate);
+	if (ret)
+		goto out;
+
+	clk->rate = iva_deps->iva_ck_rate;
+	return 0;
+
+out:
+	return ret;
+};
+
+static long omap4_virt_dsp_round_rate(struct clk *clk, unsigned long rate)
+{
+	return rate;
+};
+
+static int omap4_virt_dsp_set_rate(struct clk *clk, unsigned long rate)
+{
+	clk->rate = rate;
+	return 0;
+};
+
 int __init omap4xxx_clk_init(void)
 {
 	struct omap_clk *c;
 	u32 cpu_clkflg = 0;
+#ifdef CONFIG_LIVE_OC
+	int i;
+
+	unsigned long dpll_corex2_freq;
+#endif
 
 	if (cpu_is_omap443x()) {
 		cpu_mask = RATE_IN_443X;
@@ -3882,6 +4124,58 @@ int __init omap4xxx_clk_init(void)
 	 * enable other clocks as necessary
 	 */
 	clk_enable_init_clocks();
+
+#ifdef CONFIG_LIVE_OC
+	dpll_corex2_freq = dpll_core_x2_ck.rate;
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M2_OPP50_RATE) {
+		dividers[DPLL_CORE_M2_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M3_OPP50_RATE) {
+		dividers[DPLL_CORE_M3_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M6_OPP50_RATE) {
+		dividers[DPLL_CORE_M6_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M7_OPP50_RATE) {
+		dividers[DPLL_CORE_M7_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M2_OPP100_RATE) {
+		dividers[NUM_DEP_CLOCKS + DPLL_CORE_M2_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M3_OPP100_RATE) {
+		dividers[NUM_DEP_CLOCKS + DPLL_CORE_M3_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M6_OPP100_RATE) {
+		dividers[NUM_DEP_CLOCKS + DPLL_CORE_M6_INDEX] = i;
+		break;
+	    }
+
+	for (i = 1; i <= MAX_DIVIDER; i++)
+	    if (dpll_corex2_freq / i == DPLL_CORE_M7_OPP100_RATE) {
+		dividers[NUM_DEP_CLOCKS + DPLL_CORE_M7_INDEX] = i;
+		break;
+	    }
+#endif
 
 	return 0;
 }

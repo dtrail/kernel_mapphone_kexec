@@ -387,6 +387,10 @@ config MACH_MAPPHONE
 	select OMAP_REBOOT_REASON
 	select OMAP_RAM_CONSOLE
 
+config MACH_MAPPHONE_SOLANA
+	bool "Droid 3 Support (XT862/XT860/XT883)"
+	depends on MACH_MAPPHONE
+
 config EMU_UART_DEBUG
 	bool "Setting MiniUSB port as UART3 to debug kernel"
 	default n
@@ -497,6 +501,63 @@ config OMAP4_PPA_CPU1_ONLINE_BUG
 	  If, on the other hand, you do not understand the change, leave the
 	  default as enabled.
 
+config OMAP_SMARTREFLEX_CUSTOM_SENSOR
+    bool "Enable support for custom NSensor and PSensor values"
+    depends on OMAP_SMARTREFLEX
+    default y
+    help
+      Enable support for custom NSensor and PSensor values in the
+      voltage definitions used for Smartreflex calibration.
+
+config OMAP_OCFREQ_12
+    bool "Enable 1.2, 1.35GHz and OC MPU frequency slot"
+    help
+      Enable the 1.2, 1.35GHz and OC MPU frequency slot.
+
+config FORCE_FAST_CHARGE
+	bool "Force AC charge mode at will"
+	default y
+	help
+	  A simple sysfs interface to force adapters that
+	  are detected as USB to charge as AC.
+
+config OMAP_IPU_DEEPIDLE
+	bool "Enable C-states > C1 when IPU is active"
+	default n
+	help
+	  Enable C-states > C1 during hardware-accelerated video playback.
+
+config OMAP_C4_MPUOSWR
+	bool  "Enable Open Switch Retention in the C4 state for the MPU"
+	depends on OMAP_ALLOW_OSWR
+	default n
+	help
+	 Select this option to enable powering down the MPU logic
+	 in the C4 state reducing the power consumption.
+
+config OMAP4_PPA_CPU1_ONLINE_BUG
+	bool "Enable Support for CPU1 ONLINE WA for OSWR/OFF"
+	depends on ARCH_OMAP4
+	depends on OMAP_ALLOW_OSWR
+	default y
+	help
+	  If an non GP OMAP4 device is used and PPA revision is < v1.7.3,
+	  the device does not perform the memory maintenance and TLB sync
+	  operations required before releasing CPU1 to HLOS. This results
+	  in crash while resuming from OFF mode.
+
+	  Disable this option *ONLY IF* you meet the minimum PPA version
+	  requirement.
+
+	  If, on the other hand, you do not understand the change, leave the
+	  default as enabled.
 endmenu
+
+config RQ_STATS
+	bool "Enable Run queue statistics"
+	default n
+	help
+	  Select this to enable scheduler rune queue statistic
+	  collections
 
 endif
