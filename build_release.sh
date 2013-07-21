@@ -25,5 +25,8 @@ make ARCH=arm mapphone_defconfig
 echo "Building..."
 make -j4
 
+# Build modules
+make modules
+
 
 echo "done"
