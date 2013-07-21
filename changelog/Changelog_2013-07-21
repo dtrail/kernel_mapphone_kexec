@@ -1,0 +1,29 @@
+4685d7f Update build script
+d2a56d5 Bui8ld script update
+5d5bb6d omap: disp: panel: Fix for edison boot failure
+dd6cd4a Enable additional features
+6a428e9 Insert RNG crypto module and add moto_crypto source files
+8623cdb Remove obsolete stuff
+34576d6 No localversion custom string
+76afb99 Remove vermagic patch due to crypto validation failure
+7bc9ac8 Temporary disable localversion patch
+5ab9193 Try this for crypto validation
+911cba7 Remove unused function
+6530cf1 Revert "block,elevator: use new hashtable implementation"
+24d0238 Revert "hashtable: introduce a small and naive hashtable"
+c41b2a8 New config
+b38537c Check this config for crypto validation failure
+5c154ee Add missing library for dynamic interactive
+27e2b24 hashtable: introduce a small and naive hashtable
+52adb4c block,elevator: use new hashtable implementation
+1fa4075 Enable uksm
+49886d8 UKSM: Upgrade to 0.1.2.2
+9a1c808 Add UKSM 0.1.2
+21ef21a kernel: fork: fix
+944a0df kernel: sched_fair: remove obsolete definition
+f2d8c5a ARM: 7011/1: Add ARM cpu topology definition
+3c8ff4e Add missing topology driver
+c08a10a Add missing header file
+c627098 Add build script
+b21e8ae Extend defcxonfig
+075cb8b Import mods from JBX kernel
