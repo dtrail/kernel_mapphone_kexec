@@ -54,11 +54,11 @@ mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail/built
 
 
 # Exporting changelog to file
-echo "Exporting changelog to file: '/built/Changelog-[date]'"
-cd /home/mnl-manz/dtrail/kernel_mapphone_kexec
-git log --oneline --after="yesterday" > /home/mnl-manz/dtrail/kernel_mapphone_kexec/changelog/Changelog_$(date +"%Y-%m-%d")
-git add changelog/ .
-git commit -m "Added todays changelog"
-git push origin stock-mod
+#echo "Exporting changelog to file: '/built/Changelog-[date]'"
+#cd /home/mnl-manz/dtrail/kernel_mapphone_kexec
+#git log --oneline --after="yesterday" > /home/mnl-manz/dtrail/kernel_mapphone_kexec/changelog/Changelog_$(date +"%Y-%m-%d")
+#git add changelog/ .
+#git commit -m "Added todays changelog"
+#git push origin stock-mod
 
 echo "Done. Kernel Package is ready!"
