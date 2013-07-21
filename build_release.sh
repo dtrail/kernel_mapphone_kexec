@@ -35,7 +35,7 @@ make -j4
 # Keep in mind that we assume that the modules were already built and are in place
 # So we just copy and rename, then pack to zip including the date
 echo "Packaging flashable Zip file..."
-
+cp arch/arm/boot/zImage /home/mnl-manz/dtrail/built/system/etc/kexec/kernel
 
 # Build modules
 make modules
@@ -50,7 +50,6 @@ find -name '*.ko' -exec mv {} /home/mnl-manz/dtrail/built/system/lib/modules \;
 cd /home/mnl-manz/dtrail/built
 zip -r "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" *
 mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail/built
-cp arch/arm/boot/zImage /home/mnl-manz/dtrail/built/system/etc/kexec/kernel
 
 
 # Exporting changelog to file
