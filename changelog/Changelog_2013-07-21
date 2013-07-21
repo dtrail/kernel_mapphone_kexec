@@ -1,3 +1,5 @@
+a2939d2 Revert "Revert "Revert "Revert "Remove vermagic patch due to crypto validation failure""""
+b3a17e7 Added todays changelog
 7b2df46 aFix build scriot
 ff07b48 Add RNG crypto module
 c213db6 Revert "Revert "Remove unused function""
