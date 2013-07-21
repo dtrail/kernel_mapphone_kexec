@@ -1,3 +1,14 @@
+d93a308 Fix build script - this time BEFORE going through a 4-hours nightmare...lol
+e601501 Enable better scheduler
+c9e9ac9 Enable better governors
+2024d27 --POINT FOR WORKING KERNEL HERE --
+42cb73b Some more testing..
+d835a02 Revert "Revert "Remove vermagic patch due to crypto validation failure""
+5c59d40 Revert "Revert "Remove unused function""
+8affe71 Revert "Revert "Revert "block,elevator: use new hashtable implementation"""
+609f9d4 Revert "Revert "Revert "hashtable: introduce a small and naive hashtable"""
+176e364  some testing
+0165741 Added todays changelog
 45267d4 Added todays changelog
 fda13cf Disable options which break boot
 b14f615 Added todays changelog
