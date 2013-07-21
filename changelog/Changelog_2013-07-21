@@ -1,3 +1,11 @@
+711e70f Add Gamma control option and localversion
+2233efa Revert "Revert "hashtable: introduce a small and naive hashtable""
+1408167 Revert "Revert "block,elevator: use new hashtable implementation""
+6a3863e Revert "Remove unused function"
+1e6153a Revert "Revert "Revert "hashtable: introduce a small and naive hashtable"""
+1362e67 Revert "Revert "hashtable: introduce a small and naive hashtable""
+1ac42d7 Revert "Remove vermagic patch due to crypto validation failure"
+7700c9c Added Changelog
 6713425 Added Changelog
 4685d7f Update build script
 d2a56d5 Bui8ld script update
