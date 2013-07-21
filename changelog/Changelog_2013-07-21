@@ -1,3 +1,7 @@
+8edd225 Try stable config with localversion
+ca4522b Revert "Revert "Revert "Remove vermagic patch due to crypto validation failure"""
+9516090 --- STABLE POINT HERE ---
+125c02c Added todays changelog
 eb9029d Let's see how this goes
 2c15ebb FInal fix for build script
 110925f Added todays changelog
