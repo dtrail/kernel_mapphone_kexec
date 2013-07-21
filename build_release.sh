@@ -21,7 +21,7 @@ export CROSS_COMPILE=arm-eabi-
 
 # define the defconfig (Do not change)
 make ARCH=arm mapphone_defconfig
-export LOCALVERSION="-Stock-1.0-Core"
+# export LOCALVERSION="-Stock-1.0-Core"
 
 
 # execute build command with "-j4 core flag" 
@@ -38,12 +38,12 @@ echo "Packaging flashable Zip file..."
 cp arch/arm/boot/zImage /home/mnl-manz/dtrail/built/system/etc/kexec/kernel
 
 # Build modules
-make modules
+# make modules
 
 
 # Move the modules to package folder
-echo "Copying modules to package folder"
-find -name '*.ko' -exec mv {} /home/mnl-manz/dtrail/built/system/lib/modules \;
+# echo "Copying modules to package folder"
+# find -name '*.ko' -exec mv {} /home/mnl-manz/dtrail/built/system/lib/modules \;
 
 
 # Pack the stuff together
