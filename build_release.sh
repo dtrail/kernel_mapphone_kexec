@@ -21,7 +21,7 @@ export CROSS_COMPILE=arm-eabi-
 
 # define the defconfig (Do not change)
 make ARCH=arm mapphone_defconfig
-export LOCALVERSION="-Stock-1.0-Core"
+# export LOCALVERSION="-Stock-1.0-Core"
 
 
 # execute build command with "-j4 core flag" 
@@ -37,7 +37,6 @@ make -j4
 echo "Packaging flashable Zip file..."
 cp arch/arm/boot/zImage /home/mnl-manz/dtrail/built/system/etc/kexec/kernel
 
-
 # Build modules
 make modules
 
@@ -50,15 +49,15 @@ find -name '*.ko' -exec mv {} /home/mnl-manz/dtrail/built/system/lib/modules \;
 # Pack the stuff together
 cd /home/mnl-manz/dtrail/built
 zip -r "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" *
-mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail/built
+mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail
 
 
 # Exporting changelog to file
-#echo "Exporting changelog to file: '/built/Changelog-[date]'"
-#cd /home/mnl-manz/dtrail/kernel_mapphone_kexec
-#git log --oneline --after="yesterday" > /home/mnl-manz/dtrail/kernel_mapphone_kexec/changelog/Changelog_$(date +"%Y-%m-%d")
-#git add changelog/ .
-#git commit -m "Added todays changelog"
-#git push origin stock-mod
+echo "Exporting changelog to file: '/built/Changelog-[date]'"
+cd /home/mnl-manz/dtrail/kernel_mapphone_kexec
+git log --oneline --after="yesterday" > /home/mnl-manz/dtrail/kernel_mapphone_kexec/changelog/Changelog_$(date +"%Y-%m-%d")
+git add changelog/ .
+git commit -m "Added todays changelog"
+git push origin stock-mod
 
 echo "Done. Kernel Package is ready!"
