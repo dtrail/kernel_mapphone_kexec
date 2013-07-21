@@ -49,7 +49,7 @@ find -name '*.ko' -exec mv {} /home/mnl-manz/dtrail/built/system/lib/modules \;
 # Pack the stuff together
 cd /home/mnl-manz/dtrail/built
 zip -r "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" *
-mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail/built
+mv "Stock-1.0-Core-Kernel_$(date +"%Y-%m-%d").zip" /home/mnl-manz/dtrail
 
 
 # Exporting changelog to file
