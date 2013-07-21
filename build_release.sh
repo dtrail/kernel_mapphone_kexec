@@ -21,7 +21,7 @@ export CROSS_COMPILE=arm-eabi-
 
 # define the defconfig (Do not change)
 make ARCH=arm mapphone_defconfig
-export LOCALVERSION="-Stock-1.0-Core"
+# export LOCALVERSION="-Stock-1.0-Core"
 
 
 # execute build command with "-j4 core flag" 
