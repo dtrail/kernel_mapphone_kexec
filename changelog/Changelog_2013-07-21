@@ -1,3 +1,6 @@
+cb9360a This setting will work for sure! Has been tested successfully.
+471317b Revert "Revert "Revert "Revert "Remove vermagic patch due to crypto validation failure""""
+3847a87 Added todays changelog
 8edd225 Try stable config with localversion
 ca4522b Revert "Revert "Revert "Remove vermagic patch due to crypto validation failure"""
 9516090 --- STABLE POINT HERE ---
