@@ -28,7 +28,7 @@ make ARCH=arm mapphone_defconfig
 # (You may change this to the count of your CPU.
 # Don't set it too high or it will result in a non-bootable kernel.
 echo "Building..."
-make -j4
+make -j8
 
 
 # Copy and rename the zImage into nightly/nightly package folder
