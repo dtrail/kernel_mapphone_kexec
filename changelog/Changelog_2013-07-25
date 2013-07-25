@@ -1,5 +1,5 @@
+b4d5a67 Merge branch 'ics-test' into stock-ics-kexec
+399b2ea serial: omap: disable serial port irq during suspend
+ed7ddd6 EMU_UART: clean up
+316ad33 Added todays changelog
 0136187 trying around defconfig setups...
-0ff14be Config dhanged again..
-8562e8b Another defconfig update.-..... Searching the right configuration - this was missed in prior development
-dfa1d9e Enable missing otion
-872e31e build script updated
