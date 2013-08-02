@@ -29,6 +29,7 @@
 #include <linux/cpu.h>
 #include <linux/thermal_framework.h>
 #include <linux/platform_device.h>
+#include <linux/earlysuspend.h>
 
 #include <asm/system.h>
 #include <asm/smp_plat.h>
@@ -105,6 +106,38 @@ static unsigned int omap_getspeed(unsigned int cpu)
 	return rate;
 }
 
+static void omap_cpufreq_lpj_recalculate(unsigned int target_freq,
+					unsigned int cur_freq)
+{
+#ifdef CONFIG_SMP
+	unsigned int i;
+
+	/*
+	* Note that loops_per_jiffy is not updated on SMP systems in
+	* cpufreq driver. So, update the per-CPU loops_per_jiffy value
+	* on frequency transition. We need to update all dependent CPUs.
+	*/
+	for_each_possible_cpu(i) {
+		struct lpj_info *lpj = &per_cpu(lpj_ref, i);
+	if (!lpj->freq) {
+		lpj->ref = per_cpu(cpu_data, i).loops_per_jiffy;
+		lpj->freq = cur_freq;
+		}
+
+		per_cpu(cpu_data, i).loops_per_jiffy =
+		cpufreq_scale(lpj->ref, lpj->freq, target_freq);
+	}	
+
+		/* And don't forget to adjust the global one */
+	if (!global_lpj_ref.freq) {
+		global_lpj_ref.ref = loops_per_jiffy;
+		global_lpj_ref.freq = cur_freq;
+		}
+		loops_per_jiffy = cpufreq_scale(global_lpj_ref.ref, global_lpj_ref.freq,
+										target_freq);
+#endif
+}
+
 int omap_cpufreq_scale(struct device *req_dev, unsigned int target_freq)
 {
 	unsigned int i;
@@ -140,6 +173,7 @@ int omap_cpufreq_scale(struct device *req_dev, unsigned int target_freq)
 	ret = omap_device_scale(req_dev, mpu_dev, freqs.new * 1000);
 
 	freqs.new = omap_getspeed(0);
+
 
 #ifdef CONFIG_SMP
 	/*
@@ -289,6 +323,134 @@ static int omap_target(struct cpufreq_policy *policy,
 
 	return ret;
 }
+
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+#define MAX_GOV_NAME_LEN 16
+static char cpufreq_default_gov[CONFIG_NR_CPUS][MAX_GOV_NAME_LEN];
+static char *cpufreq_conservative_gov = "conservative";
+
+static void cpufreq_store_default_gov(void)
+{
+unsigned int cpu;
+struct cpufreq_policy *policy;
+
+	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
+			policy = cpufreq_cpu_get(cpu);
+		if (policy) {
+			sprintf(cpufreq_default_gov[cpu], "%s",
+			policy->governor->name);
+			cpufreq_cpu_put(policy);
+			}
+		}
+	}
+
+static int cpufreq_change_gov(char *target_gov)
+	{
+	unsigned int cpu = 0;
+	for_each_online_cpu(cpu)
+	return cpufreq_set_gov(target_gov, cpu);
+	}
+
+static int cpufreq_restore_default_gov(void)
+	{
+int ret = 0;
+unsigned int cpu;
+
+	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
+		if (strlen((const char *)&cpufreq_default_gov[cpu])) {
+			ret = cpufreq_set_gov(cpufreq_default_gov[cpu], cpu);
+		if (ret < 0)
+	/* Unable to restore gov for the cpu as
+	* It was online on suspend and becomes
+	* offline on resume.
+	*/
+		pr_info("Unable to restore gov:%s for cpu:%d,"
+		, cpufreq_default_gov[cpu]
+		, cpu);
+								}
+		cpufreq_default_gov[cpu][0] = '\0';
+	}
+			return ret;
+}
+#endif
+
+static void omap_cpu_early_suspend(struct early_suspend *h)
+{
+	unsigned int cur;
+
+	mutex_lock(&omap_cpufreq_lock);
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = false;
+#endif
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+		cpufreq_store_default_gov();
+	if (cpufreq_change_gov(cpufreq_conservative_gov))
+			pr_err("Early_suspend: Error changing governor to %s\n",
+			cpufreq_conservative_gov);
+#endif
+#ifdef CONFIG_BATTERY_FRIEND
+    if (likely(battery_friend_active))
+	{
+        if (dyn_hotplug) {
+                if (cpu_online(1))
+                        cpu_down(1);
+
+	pr_info("Battery Friend: CPU1 down due to device suspend\n");
+        	}
+	}     
+#endif
+
+	if (screen_off_max_freq) {
+		max_capped = screen_off_max_freq;
+
+		cur = omap_getspeed(0);
+	if (cur > max_capped)
+		omap_cpufreq_scale(max_capped, cur);
+	}
+	mutex_unlock(&omap_cpufreq_lock);
+}
+
+static void omap_cpu_late_resume(struct early_suspend *h)
+{
+unsigned int cur;
+
+	mutex_lock(&omap_cpufreq_lock);
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = true;
+#endif
+#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
+	if (cpufreq_restore_default_gov())
+		pr_err("Early_suspend: Unable to restore governor\n");
+#endif
+#ifdef CONFIG_BATTERY_FRIEND
+    if (likely(battery_friend_active))
+	{
+
+        if (dyn_hotplug) {
+                if (cpu_online(1) == false)
+                        cpu_up(1);
+
+	pr_info("Battery Friend: CPU1 up due to device wakeup\n");
+        }
+ }   
+#endif	
+
+	if (max_capped) {
+		max_capped = 0;
+
+		cur = omap_getspeed(0);
+	if (cur != current_target_freq)
+		omap_cpufreq_scale(current_target_freq, cur);
+	}
+	mutex_unlock(&omap_cpufreq_lock);
+}
+
+static struct early_suspend omap_cpu_early_suspend_handler = {
+	.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN,
+	.suspend = omap_cpu_early_suspend,
+	.resume = omap_cpu_late_resume,
+};
 
 static inline void freq_table_free(void)
 {
@@ -728,80 +890,12 @@ static struct cpufreq_driver omap_driver = {
 	.attr		= omap_cpufreq_attr,
 };
 
-#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
-#define MAX_GOV_NAME_LEN 16
-static char cpufreq_default_gov[CONFIG_NR_CPUS][MAX_GOV_NAME_LEN];
-static char *cpufreq_conservative_gov = "conservative";
 
-static void cpufreq_store_default_gov(void)
-{
-unsigned int cpu;
-struct cpufreq_policy *policy;
-
-	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
-			policy = cpufreq_cpu_get(cpu);
-		if (policy) {
-			sprintf(cpufreq_default_gov[cpu], "%s",
-			policy->governor->name);
-			cpufreq_cpu_put(policy);
-			}
-		}
-	}
-
-static int cpufreq_change_gov(char *target_gov)
-	{
-	unsigned int cpu = 0;
-	for_each_online_cpu(cpu)
-	return cpufreq_set_gov(target_gov, cpu);
-	}
-
-static int cpufreq_restore_default_gov(void)
-	{
-int ret = 0;
-unsigned int cpu;
-
-	for (cpu = 0; cpu < CONFIG_NR_CPUS; cpu++) {
-		if (strlen((const char *)&cpufreq_default_gov[cpu])) {
-			ret = cpufreq_set_gov(cpufreq_default_gov[cpu], cpu);
-		if (ret < 0)
-	/* Unable to restore gov for the cpu as
-	* It was online on suspend and becomes
-	* offline on resume.
-	*/
-		pr_info("Unable to restore gov:%s for cpu:%d,"
-		, cpufreq_default_gov[cpu]
-		, cpu);
-								}
-		cpufreq_default_gov[cpu][0] = '\0';
-	}
-			return ret;
-}
-#endif
 
 static int omap_cpufreq_suspend_noirq(struct device *dev)
 {
 	mutex_lock(&omap_cpufreq_lock);
-#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
-lmf_screen_state = false;
-#endif
-#ifdef CONFIG_BATTERY_FRIEND
-    if (likely(battery_friend_active))
-	{
-        if (dyn_hotplug) {
-                if (cpu_online(1))
-                        cpu_down(1);
 
-	pr_info("Battery Friend: CPU1 down due to device suspend\n");
-        }
-}     
-else
-#endif
-#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
-		cpufreq_store_default_gov();
-		if (cpufreq_change_gov(cpufreq_conservative_gov))
-		pr_err("Suspend: Error changing governor to %s\n",
-		cpufreq_conservative_gov);
-#endif
 	omap_cpufreq_suspended = true;
 	mutex_unlock(&omap_cpufreq_lock);
 	return 0;
@@ -810,26 +904,6 @@ else
 static int omap_cpufreq_resume_noirq(struct device *dev)
 {
 	mutex_lock(&omap_cpufreq_lock);
-#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
-lmf_screen_state = true;
-#endif
-#ifdef CONFIG_BATTERY_FRIEND
-    if (likely(battery_friend_active))
-	{
-
-        if (dyn_hotplug) {
-                if (cpu_online(1) == false)
-                        cpu_up(1);
-
-	pr_info("Battery Friend: CPU1 up due to device wakeup\n");
-        }
- }   
-else
-#endif	
-#ifdef CONFIG_CONSERVATIVE_GOV_WHILE_SCREEN_OFF
-	if (cpufreq_restore_default_gov())
-		pr_err("Suspend: Unable to restore governor\n");
-#endif
 
 	if (omap_getspeed(0) != current_target_freq)
 		omap_cpufreq_scale(mpu_dev, current_target_freq);
@@ -879,6 +953,8 @@ static int __init omap_cpufreq_init(void)
 	}
 
 
+	register_early_suspend(&omap_cpu_early_suspend_handler);
+
 	ret = cpufreq_register_driver(&omap_driver);
 	omap_cpufreq_ready = !ret;
 
@@ -903,6 +979,8 @@ static void __exit omap_cpufreq_exit(void)
 {
 	omap_cpufreq_cooling_exit();
 	cpufreq_unregister_driver(&omap_driver);
+
+	unregister_early_suspend(&omap_cpu_early_suspend_handler);
 
 	platform_driver_unregister(&omap_cpufreq_platform_driver);
 	platform_device_unregister(&omap_cpufreq_device);
