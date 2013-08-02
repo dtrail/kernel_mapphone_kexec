@@ -625,6 +625,15 @@ else
 		cpumask_setall(policy->cpus);
 	}
 
+#ifdef CONFIG_BATTERY_FRIEND
+if (likely(battery_friend_active))
+	{
+	if (!omap_cpufreq_suspended) {
+                if ((cpu_online(1) == false) || (cpu_down(1))
+                        cpu_up(1);
+	}
+}
+#endif
 	/* Tranisition time for worst case */
 	policy->cpuinfo.transition_latency = 40 * 1000;
 
