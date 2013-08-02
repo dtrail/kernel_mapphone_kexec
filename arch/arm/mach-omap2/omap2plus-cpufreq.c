@@ -629,7 +629,7 @@ else
 if (likely(battery_friend_active))
 	{
 	if (!omap_cpufreq_suspended) {
-                if ((cpu_online(1) == false) || (cpu_down(1))
+                if ((cpu_online(1) == false) || (cpu_down(1)))
                         cpu_up(1);
 	}
 }
