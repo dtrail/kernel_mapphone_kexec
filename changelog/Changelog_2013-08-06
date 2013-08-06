@@ -1,3 +1,5 @@
+b4fec6a Build script, defconfig updates
+e26807c Added todays changelog
 f36b2e6 Battery Friend: Fix dynamic fsync
 b8d8663 Battery Friend: Fix typo
 2c82f24 Battery Friend: Don't allow hotplug during device is active
